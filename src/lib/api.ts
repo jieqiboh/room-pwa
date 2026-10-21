@@ -1,24 +1,33 @@
-export type Action = 'up' | 'down' | 'stop'
-
 export interface Last { action: string; sent_at: string; by: string | null }
-export interface HistoryItem { by: string | null; action: string; at: number; sent: boolean; error: string | null }
-export interface State {
+export interface Button { id: string; label: string }
+export interface Card { device: string; picks: string[] }
+export interface Page { id: string; name: string; cards: Card[] }
+export interface Layout { pages: Page[]; last: string | null }
+export interface DeviceView {
+  id: string; name: string; kind: string
+  buttons: Button[]
+  presets: string[]
+  last_action: string | null; sent_at: string | null
+  on: boolean | null; brightness: number | null; error: string | null
+  by: string | null
+}
+export interface HouseState {
   me: string | null
+  layout: Layout
   reachable: boolean
-  last: Last | null
-  history: HistoryItem[]
+  devices: DeviceView[]
   error?: string
 }
 
 // Thrown when Access no longer lets us through: the page must reload to sign in.
 export class SignedOut extends Error {}
 
-async function request<T>(init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
     // `manual`: an expired Access session answers with a redirect to its sign-in
     // page, which fetch cannot follow cross-origin anyway.
-    res = await fetch('/api/shutter', { ...init, redirect: 'manual', cache: 'no-store' })
+    res = await fetch(path, { ...init, redirect: 'manual', cache: 'no-store' })
   } catch {
     throw new Error("No connection. Check the phone's Wi-Fi or data.")
   }
@@ -29,11 +38,18 @@ async function request<T>(init?: RequestInit): Promise<T> {
   return body as T
 }
 
-export const getState = () => request<State>()
+const send = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+})
 
-export const press = (action: Action) =>
-  request<{ last: Last }>({
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action }),
-  })
+export const getHouse = () => request<HouseState>('/api/house')
+
+export const saveLayout = (l: Layout) => request<Layout>('/api/layout', send('PUT', l))
+
+export const press = (device: string, button: string) =>
+  request<{ last: Last }>('/api/press', send('POST', { device, button }))
+
+export const setLights = (device: string, opts: { on?: boolean; brightness?: number; preset?: string }) =>
+  request<{ done: string; note: string | null }>('/api/lights', send('POST', { device, ...opts }))

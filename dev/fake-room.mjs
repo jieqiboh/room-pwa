@@ -9,6 +9,13 @@ const TOKEN = process.env.ROOM_TOKEN ?? 'dev'
 const PORT = Number(process.env.PORT ?? 8008)
 let last = { last_action: null, sent_at: null }
 const calls = []
+const btn = (id, label) => ({ id, label })
+const devices = [
+  { id: 'shutter', name: 'Shutter', kind: 'shutter', buttons: [btn('down', 'Down'), btn('stop', 'Stop'), btn('up', 'Up')], presets: [] },
+  { id: 'aircon', name: 'Aircon', kind: 'aircon', buttons: [btn('cool_24_fan2', 'Cool 24'), btn('cool_26_fan4', 'Cool 26'), btn('off', 'Off')], presets: [] },
+  { id: 'fan', name: 'Fan', kind: 'fan', buttons: [btn('power', 'Power'), btn('speed', 'Speed')], presets: [] },
+  { id: 'jq-lights', name: "JQ's lights", kind: 'lights', buttons: [], presets: ['warm', 'cool', 'night'] },
+].map((d) => ({ ...d, last_action: null, sent_at: null, on: d.kind === 'lights' ? false : null, brightness: d.kind === 'lights' ? 50 : null, error: null }))
 
 const sse = (res, msg, headers = {}) => {
   res.writeHead(200, { 'content-type': 'text/event-stream', ...headers })
@@ -41,6 +48,30 @@ createServer(async (req, res) => {
   const { name, arguments: args } = msg.params
   calls.push(name)
   console.log('tools/call', name, args)
+  if (name === 'house') {
+    if (process.env.FAIL === 'rm4') {
+      return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'RM4 did not respond' }], isError: true } })
+    }
+    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ devices }) })
+  }
+  if (name === 'press') {
+    const d = devices.find((x) => x.id === args.device)
+    if (!d || !d.buttons.some((b) => b.id === args.button)) {
+      return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'unknown device or button' }], isError: true } })
+    }
+    const sent_at = new Date().toISOString().replace(/\.\d+Z$/, '+00:00')
+    d.last_action = args.button
+    d.sent_at = sent_at
+    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ action: args.button, sent_at }) })
+  }
+  if (name === 'lights') {
+    const d = devices.find((x) => x.id === args.device && x.kind === 'lights')
+    if (!d) return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'unknown lights' }], isError: true } })
+    if (args.on !== undefined) d.on = args.on
+    if (args.brightness !== undefined) { d.brightness = args.brightness; d.on = true }
+    if (args.preset !== undefined) { d.on = true; d.brightness = 70 }
+    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ target: d.id, done: true, note: 'fake' }) })
+  }
   if (name === 'shutter_status') return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ ...last, note: 'fake', choices: ['down', 'stop', 'up'] }) })
   if (name === 'shutter') {
     if (process.env.FAIL === 'rm4') {

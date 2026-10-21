@@ -23,7 +23,7 @@ export interface Device {
 }
 interface House { devices: Device[] }
 interface Sent { action: string; sent_at: string }
-interface Changed { target: string; done: boolean; note: string }
+interface Changed { target: string; done: string; note: string | null }
 
 export async function getHouse(env: Env, who: string, fetchFn: typeof fetch = fetch): Promise<Response> {
   const layout = await getLayout(env, who);

@@ -1,14 +1,33 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { getState, press, SignedOut, type Action, type State } from './lib/api'
+  import DeviceCard from './DeviceCard.svelte'
+  import { getHouse, press, saveLayout, setLights, SignedOut, type DeviceView, type HouseState } from './lib/api'
 
-  let info = $state<State | null>(null)
-  let busy = $state<Action | null>(null)
+  let house = $state<HouseState | null>(null)
+  let busy = $state(false)
   let error = $state<string | null>(null)
   let signedOut = $state(false)
-  let showHistory = $state(false)
 
-  const LABELS: Record<string, string> = { up: 'Up', down: 'Down', stop: 'Stop' }
+  const CACHE_KEY = 'room-devices'
+  function readCache(): DeviceView[] {
+    try {
+      const v = JSON.parse(localStorage.getItem(CACHE_KEY) ?? '[]')
+      return Array.isArray(v) ? v : []
+    } catch {
+      return []
+    }
+  }
+  function writeCache(d: DeviceView[]) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(d))
+    } catch { /* storage unavailable: nothing to cache */ }
+  }
+  let cached = $state<DeviceView[]>(readCache())
+  const devices = $derived(house?.reachable ? house.devices : cached)
+
+  const page = $derived(
+    house ? (house.layout.pages.find((p) => p.id === house!.layout.last) ?? house.layout.pages[0]) : undefined,
+  )
 
   function fail(e: unknown) {
     if (e instanceof SignedOut) signedOut = true
@@ -17,35 +36,44 @@
 
   async function refresh() {
     try {
-      info = await getState()
-      error = info.reachable ? null : (info.error ?? null)
+      house = await getHouse()
+      error = house.reachable ? null : (house.error ?? null)
+      if (house.reachable) {
+        cached = house.devices
+        writeCache(house.devices)
+      }
     } catch (e) {
       fail(e)
     }
   }
 
-  async function send(action: Action) {
+  async function run(job: () => Promise<void>) {
     if (busy) return
-    busy = action
+    busy = true
     error = null
     try {
-      const { last } = await press(action)
-      if (info) info.last = last
+      await job()
       navigator.vibrate?.(30)
       refresh()
     } catch (e) {
       fail(e)
     } finally {
-      busy = null
+      busy = false
     }
   }
 
-  function when(iso: string | number): string {
-    const d = new Date(iso)
-    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    return d.toDateString() === new Date().toDateString()
-      ? time
-      : `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${time}`
+  const onpress = (device: string, button: string) => run(async () => { await press(device, button) })
+  const onlights = (device: string, opts: { on?: boolean; brightness?: number; preset?: string }) =>
+    run(async () => { await setLights(device, opts) })
+
+  async function firstPage() {
+    if (!house?.me) return
+    try {
+      const id = crypto.randomUUID()
+      house.layout = await saveLayout({ pages: [{ id, name: house.me, cards: [] }], last: id })
+    } catch (e) {
+      fail(e)
+    }
   }
 
   onMount(() => {
@@ -59,8 +87,8 @@
 
 <main>
   <header>
-    <h1>Shutter</h1>
-    {#if info?.me}<span class="me">{info.me} · <a href="/__logout">Not {info.me}?</a></span>{/if}
+    <h1>{page ? `${page.name} ▾` : 'Room'}</h1>
+    {#if house?.me}<span class="me">{house.me} · <a href="/__logout">Not {house.me}?</a></span>{/if}
   </header>
 
   {#if signedOut}
@@ -72,46 +100,23 @@
     <div class="banner" role="alert">{error}</div>
   {/if}
 
-  <div class="buttons">
-    <button class="big" onclick={() => send('up')} disabled={!!busy || signedOut} aria-busy={busy === 'up'}>
-      <span class="arrow">▲</span> Up
-    </button>
-    <button class="big stop" onclick={() => send('stop')} disabled={!!busy || signedOut} aria-busy={busy === 'stop'}>
-      <span class="arrow">■</span> Stop
-    </button>
-    <button class="big" onclick={() => send('down')} disabled={!!busy || signedOut} aria-busy={busy === 'down'}>
-      <span class="arrow">▼</span> Down
-    </button>
-  </div>
-
-  <p class="last">
-    {#if busy}
-      Sending {LABELS[busy].toLowerCase()}…
-    {:else if info?.last}
-      Last sent: <strong>{LABELS[info.last.action]?.toLowerCase() ?? info.last.action}</strong>,
-      {when(info.last.sent_at)}{info.last.by ? ` by ${info.last.by}` : ', not from this app'}
-    {:else if info?.reachable}
-      Nothing sent yet.
-    {:else}
-      &nbsp;
-    {/if}
-  </p>
-  <p class="note">
-    This shows the last button pressed, not where the shutter is. The wall remote moves it too.
-  </p>
-
-  {#if info?.history.length}
-    <button class="link" onclick={() => (showHistory = !showHistory)}>
-      {showHistory ? 'Hide' : 'Show'} recent presses
-    </button>
-    {#if showHistory}
-      <ul class="history">
-        {#each info.history as h}
-          <li class:failed={!h.sent}>
-            {when(h.at)} · {h.by} · {LABELS[h.action] ?? h.action}{h.sent ? '' : ' (not sent)'}
-          </li>
-        {/each}
-      </ul>
-    {/if}
+  {#if house && !page}
+    <button class="link" onclick={firstPage} disabled={signedOut}>Make your first page</button>
+  {:else if page}
+    {#each page.cards as card (card.device)}
+      <DeviceCard
+        {card}
+        device={devices.find((d) => d.id === card.device)}
+        reachable={!!house?.reachable}
+        {busy}
+        disabled={signedOut || !house?.reachable}
+        {onpress}
+        {onlights}
+      />
+    {/each}
   {/if}
+
+  <p class="note">
+    This shows the last button pressed, not the device's state. The remote moves it too.
+  </p>
 </main>
