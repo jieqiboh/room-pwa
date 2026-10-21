@@ -77,13 +77,6 @@
               {b.label}
             </label>
           {/each}
-        {:else if d?.kind === 'lights'}
-          {#each d.presets as p}
-            <label class="pick">
-              <input type="checkbox" checked={card.picks.includes(p)} onchange={() => (draft = togglePick(draft, pageId, i, p))} />
-              {p}
-            </label>
-          {/each}
         {/if}
       </section>
     {:else}

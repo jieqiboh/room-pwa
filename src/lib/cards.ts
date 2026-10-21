@@ -11,7 +11,7 @@ export function cardView(
     return { ...none, buttons: device.buttons.filter((b) => card.picks.includes(b.id)), presets: [] }
   }
   if (device.kind === 'lights') {
-    return { ...none, buttons: [], presets: device.presets.filter((p) => card.picks.includes(p)) }
+    return { ...none, buttons: [], presets: device.presets }
   }
   return { ...none, buttons: device.buttons, presets: [] }
 }

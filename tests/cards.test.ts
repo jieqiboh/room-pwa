@@ -27,9 +27,9 @@ describe("cardView", () => {
     }
   });
 
-  it("lights shows picked presets", () => {
+  it("lights offers every preset of the room, whatever the picks", () => {
     const d = dev({ kind: "lights", presets: ["warm", "cool", "night"] });
-    expect(cardView({ device: "d", picks: ["night", "gone", "warm"] }, d).presets).toEqual(["warm", "night"]);
+    expect(cardView({ device: "d", picks: ["night", "gone"] }, d).presets).toEqual(["warm", "cool", "night"]);
   });
 
   it("missing device", () => {

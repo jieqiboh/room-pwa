@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import DeviceCard from './DeviceCard.svelte'
   import PageEditor from './PageEditor.svelte'
-  import { addPage, togglePick } from './lib/layout'
+  import { addPage } from './lib/layout'
   import { getHouse, press, saveLayout, savePreset, setLights, SignedOut, type DeviceView, type HouseState, type Layout } from './lib/api'
 
   let house = $state<HouseState | null>(null)
@@ -71,13 +71,7 @@
     run(async () => { await setLights(device, opts) })
   // Saves the lights as a preset, then puts its button on this card of the current page.
   const onsavepreset = (device: string, name: string) =>
-    run(async () => {
-      const saved = await savePreset(device, name)
-      if (!house || !page) return
-      const index = page.cards.findIndex((c) => c.device === device)
-      if (index < 0 || page.cards[index].picks.includes(saved.name)) return
-      house.layout = await saveLayout(togglePick(house.layout, page.id, index, saved.name))
-    })
+    run(async () => { await savePreset(device, name) })
 
   let menu = $state(false)
   // The layout being edited: a copy that includes a brand-new page until it is saved.
@@ -191,10 +185,6 @@
       <button class="link" onclick={editPage} disabled={signedOut}>Add devices</button>
     {/if}
   {/if}
-
-  {#if !editing}<p class="note">
-    This shows the last button pressed, not the device's state. The remote moves it too.
-  </p>{/if}
 </main>
 
 <style>

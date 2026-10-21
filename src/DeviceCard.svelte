@@ -18,28 +18,18 @@
   const view = $derived(cardView(card, device, reachable))
   const off = $derived(busy || disabled || !!device?.error)
 
-  function when(iso: string | number): string {
-    const d = new Date(iso)
-    const h = d.getHours()
-    const time = `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`
-    return d.toDateString() === new Date().toDateString()
-      ? time
-      : `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${time}`
-  }
-
-  const label = (id: string) => device?.buttons.find((b) => b.id === id)?.label ?? id
-
   const status = $derived.by(() => {
     if (!device) return ''
     if (device.error) return 'Not answering right now'
-    if (device.kind === 'lights') {
-      if (!reachable) return '—'
-      if (device.on === null) return ''
-      return device.on ? `On${device.brightness !== null ? ` · ${device.brightness}%` : ''}` : 'Off'
-    }
-    if (!device.last_action || !device.sent_at) return 'Last: nothing yet'
-    return `Last: ${label(device.last_action)} · ${when(device.sent_at)}${device.by ? ` by ${device.by}` : ''}`
+    if (device.kind !== 'lights' || !reachable || device.on === null) return ''
+    return device.on ? `On${device.brightness !== null ? ` · ${device.brightness}%` : ''}` : 'Off'
   })
+
+  function applyPreset(e: Event) {
+    const select = e.currentTarget as HTMLSelectElement
+    if (select.value) onlights(card.device, { preset: select.value })
+    select.value = ''
+  }
 
   let saving = $state(false)
   let presetName = $state('')
@@ -63,15 +53,18 @@
   {:else if view.waiting}
     <p class="status">Waiting for home…</p>
   {:else}
-    <p class="status">{status}&nbsp;</p>
+    {#if status}<p class="status">{status}</p>{/if}
     {#if device?.kind === 'lights'}
       <div class="row">
         <button class:active={device.on === true} disabled={off} onclick={() => onlights(card.device, { on: true })}>On</button>
         <button class:active={device.on === false} disabled={off} onclick={() => onlights(card.device, { on: false })}>Off</button>
-        {#each view.presets as p}
-          <button disabled={off} onclick={() => onlights(card.device, { preset: p })}>{p}</button>
-        {/each}
       </div>
+      {#if view.presets.length}
+        <select class="presets" disabled={off} aria-label="Preset" onchange={applyPreset}>
+          <option value="">Preset…</option>
+          {#each view.presets as p}<option value={p}>{p}</option>{/each}
+        </select>
+      {/if}
       <input
         type="range"
         min="1"
@@ -114,8 +107,20 @@
 
 <style>
   .card { background: #1f2937; border-radius: 16px; padding: 14px 16px; margin-bottom: 12px; }
-  h2 { font-size: 1.1rem; margin: 0 0 2px; }
-  .status { color: var(--muted); font-size: 0.9rem; margin: 0 0 10px; }
+  h2 { font-size: 1.1rem; margin: 0 0 10px; }
+  .status { color: var(--muted); font-size: 0.9rem; margin: -6px 0 10px; }
+  select.presets {
+    width: 100%;
+    min-height: 48px;
+    margin-top: 8px;
+    border: none;
+    border-radius: 12px;
+    background: var(--button);
+    color: var(--fg);
+    font-size: 1rem;
+    padding: 0 12px;
+  }
+  select.presets:disabled { opacity: 0.5; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; }
   button {
     flex: 1 1 0;
