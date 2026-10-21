@@ -57,7 +57,7 @@
   {#if page}
     <label class="field">
       <span>Page name</span>
-      <input type="text" value={page.name} maxlength="40" oninput={(e) => (draft = renamePage(draft, pageId, e.currentTarget.value))} />
+      <input type="text" value={page.name} maxlength="30" oninput={(e) => (draft = renamePage(draft, pageId, e.currentTarget.value))} />
     </label>
 
     <h3>Devices on this page</h3>

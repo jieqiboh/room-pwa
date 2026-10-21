@@ -30,6 +30,7 @@ describe("layouts", () => {
       { pages: Array.from({ length: 21 }, (_, i) => page(`p${i}`)), last: null },
       { pages: [page("a", Array.from({ length: 31 }, () => ({ device: "shutter", picks: [] })))], last: null },
       { pages: [page("a"), page("a")], last: null },
+      { pages: [page("a", [{ device: "shutter", picks: [] }, { device: "shutter", picks: [] }])], last: null },
       { pages: [{ id: "a", name: "\n\t\u0000", cards: [] }], last: null },
       { pages: [page("a", [{ device: "shutter", picks: ["x".repeat(61)] }])], last: null },
     ];

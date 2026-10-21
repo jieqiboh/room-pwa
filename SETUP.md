@@ -96,14 +96,14 @@ A brand-new Funnel name can take a few minutes to appear in public DNS. If `curl
 
 ## Part D: Test for real and install on phones
 
-1. On your phone, open `https://room-pwa.<subdomain>.workers.dev`, type your name (for example `JQ`) and the family password. You should see the page menu with no pages yet.
-2. Make a page named after yourself with the editor: add a shutter, the aircon and the lights. Each device is one card with its buttons.
+1. On your phone, open `https://room-pwa.<subdomain>.workers.dev`, type your name (for example `JQ`) and the family password. You should see a "Make your first page" button.
+2. Tap **Make your first page**. The editor opens on a page named after you: add a shutter, the aircon and the lights (each device is one card with its buttons), then tap **Save**.
 3. Press **Stop** on the shutter card (safe when the shutter isn't moving). The card should say "Last: Stop · … by JQ", and Telegram's `rstatus` should show the same command.
 4. Press **Up** or **Down** once and watch the shutter move. Try the aircon and lights too.
-4. Add it to the home screen:
+5. Add it to the home screen:
    - iPhone: in **Safari**, Share → **Add to Home Screen**.
    - Android: in Chrome, menu → **Install app**.
-5. Repeat steps 1, 2 and 5 on each family member's phone, with each person typing their own name and making their own page. They stay signed in for a year. Tell them: "Each card shows the last button pressed and who pressed it, not whether the shutter is open or the aircon is on. The wall remote and the Telegram bot work the devices too. If it says 'Can't reach home', the PC is off; use the wall remote."
+6. Repeat steps 1, 2 and 5 on each family member's phone, with each person typing their own name and making their own page. They stay signed in for a year. Tell them: "Each card shows the last button pressed and who pressed it, not whether the shutter is open or the aircon is on. The wall remote and the Telegram bot work the devices too. If it says 'Can't reach home', the PC is off; use the wall remote."
 
 ## Adding someone, or locking someone out
 
@@ -150,7 +150,7 @@ To take the room server off the internet entirely: `sudo tailscale funnel --http
 | Sign-in page keeps coming back | `SITE_PASSWORD` secret not set (`npx wrangler secret list`), or the phone blocks cookies. |
 | "Too many wrong passwords" | 10 wrong tries from one network in 15 minutes. Wait 15 minutes. |
 | Part B check returns 421 / Invalid Host header | `ROOM_ALLOWED_HOSTS` drop-in not applied: `systemctl cat room` should show it, then restart. |
-| Part B check returns 401 with the token | Wrong `ROOM_HOUSE_TOKEN`. |
+| Part B check returns 401 with the token | Wrong `ROOM_HOUSE_TOKEN`, or `ROOM_HOUSE_TOKEN` isn't set on the PC (the room log says `house off`). |
 | Part B check can't connect | Funnel off (`tailscale funnel status`), or the name isn't in public DNS yet. |
 
 ## Where the secrets live

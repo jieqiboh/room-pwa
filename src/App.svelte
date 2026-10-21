@@ -68,16 +68,6 @@
   const onlights = (device: string, opts: { on?: boolean; brightness?: number; preset?: string }) =>
     run(async () => { await setLights(device, opts) })
 
-  async function firstPage() {
-    if (!house?.me) return
-    try {
-      const id = crypto.randomUUID()
-      house.layout = await saveLayout({ pages: [{ id, name: house.me, cards: [] }], last: id })
-    } catch (e) {
-      fail(e)
-    }
-  }
-
   let menu = $state(false)
   // The layout being edited: a copy that includes a brand-new page until it is saved.
   let editing = $state<{ layout: Layout; pageId: string } | null>(null)
@@ -100,6 +90,12 @@
     menu = false
     const name = `Page ${house.layout.pages.length + 1}`
     const { layout, id } = addPage(house.layout, name)
+    editing = { layout, pageId: id }
+  }
+
+  function firstPage() {
+    if (!house?.me) return
+    const { layout, id } = addPage(house.layout, house.me)
     editing = { layout, pageId: id }
   }
 
@@ -179,6 +175,9 @@
         {onlights}
       />
     {/each}
+    {#if page.cards.length === 0}
+      <button class="link" onclick={editPage} disabled={signedOut}>Add devices</button>
+    {/if}
   {/if}
 
   {#if !editing}<p class="note">

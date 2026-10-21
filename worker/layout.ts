@@ -20,9 +20,11 @@ export function parseLayout(body: unknown): Layout | null {
     const name = cleanName(p.name);
     if (!name || !Array.isArray(p.cards) || p.cards.length > LIMITS.cards) return null;
     const cards: Card[] = [];
+    const devices = new Set<string>();
     for (const c of p.cards) {
       if (!isObj(c) || !text(c.device) || !Array.isArray(c.picks) || c.picks.length > LIMITS.picks) return null;
-      if (!c.picks.every(text)) return null;
+      if (!c.picks.every(text) || devices.has(c.device)) return null;
+      devices.add(c.device);
       cards.push({ device: c.device, picks: c.picks as string[] });
     }
     ids.add(p.id);

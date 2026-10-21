@@ -15,7 +15,7 @@
   let { card, device, busy, disabled = false, reachable = true, onpress, onlights }: Props = $props()
 
   const view = $derived(cardView(card, device, reachable))
-  const off = $derived(busy || disabled)
+  const off = $derived(busy || disabled || !!device?.error)
 
   function when(iso: string | number): string {
     const d = new Date(iso)
@@ -30,7 +30,9 @@
 
   const status = $derived.by(() => {
     if (!device) return ''
+    if (device.error) return 'Not answering right now'
     if (device.kind === 'lights') {
+      if (!reachable) return '—'
       if (device.on === null) return ''
       return device.on ? `On${device.brightness !== null ? ` · ${device.brightness}%` : ''}` : 'Off'
     }
