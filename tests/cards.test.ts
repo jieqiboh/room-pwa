@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { cardView } from "../src/lib/cards";
+import { cardView, isRepeat } from "../src/lib/cards";
 import type { DeviceView } from "../src/lib/api";
 
 const dev = (over: Partial<DeviceView>): DeviceView => ({
-  id: "d", name: "D", kind: "shutter", buttons: [], presets: [],
+  id: "d", name: "D", kind: "shutter", buttons: [], presets: [], repeat: [],
   last_action: null, sent_at: null, on: null, brightness: null, error: null, by: null, ...over,
 });
 const btn = (id: string) => ({ id, label: id });
@@ -42,3 +42,18 @@ describe("cardView", () => {
     expect(v).toEqual({ missing: false, waiting: true, buttons: [], presets: [] });
   });
 });
+
+describe("isRepeat", () => {
+  it("is true only for buttons listed in the device's repeat", () => {
+    const d = dev({ kind: "fan", repeat: ["speed_up"], buttons: [btn("speed_up"), btn("swing")] })
+    expect(isRepeat(d, "speed_up")).toBe(true)
+    expect(isRepeat(d, "swing")).toBe(false)
+    expect(isRepeat(undefined, "speed_up")).toBe(false)
+  })
+
+  it("is false, without throwing, when the device has no repeat", () => {
+    const d = dev({ kind: "fan" })
+    delete (d as Partial<DeviceView>).repeat
+    expect(isRepeat(d, "speed_up")).toBe(false)
+  })
+})

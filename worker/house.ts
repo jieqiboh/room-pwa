@@ -19,6 +19,7 @@ export interface Device {
   id: string; name: string; kind: string;
   buttons: { id: string; label: string }[];
   presets: string[];
+  repeat?: string[];
   last_action: string | null; sent_at: string | null;
   on: boolean | null; brightness: number | null; error: string | null;
 }
@@ -41,7 +42,7 @@ export async function getHouse(env: Env, who: string, fetchFn: typeof fetch = fe
     const mine = d.sent_at === null ? null : await env.DB
       .prepare("SELECT who FROM presses WHERE device = ? AND sent_at = ? ORDER BY id DESC LIMIT 1")
       .bind(d.id, d.sent_at).first<{ who: string }>();
-    return { ...d, by: mine?.who ?? null };
+    return { ...d, repeat: d.repeat ?? [], by: mine?.who ?? null };
   }));
   return json({ me: who, layout, reachable: true, devices });
 }
@@ -52,16 +53,23 @@ export async function postPress(
   const body = await readBody(req);
   const { device, button } = body;
   if (!nonEmpty(device) || !nonEmpty(button)) return json({ error: MESSAGES.badRequest }, 400);
+  const times = body.times === undefined ? 1 : body.times;
+  if (typeof times !== "number" || !Number.isInteger(times) || times < 1 || times > 24) {
+    return json({ error: MESSAGES.badRequest }, 400);
+  }
 
   const limited = await rateLimit(env, who, now);
   if (limited) return limited;
 
+  const action = times > 1 ? `${button} ×${times}` : button;
   try {
-    const sent = await callTool<Sent>(env, "press", { device, button }, fetchFn);
-    await log(env, who, device, button, now, sent.sent_at, null);
+    const sent = await callTool<Sent>(
+      env, "press", times > 1 ? { device, button, times } : { device, button }, fetchFn,
+      times > 1 ? 25_000 : undefined);
+    await log(env, who, device, action, now, sent.sent_at, null);
     return json({ last: { action: sent.action, sent_at: sent.sent_at, by: who } });
   } catch (e) {
-    await log(env, who, device, button, now, null, errorText(e));
+    await log(env, who, device, action, now, null, errorText(e));
     return json({ error: friendly(e) }, 502);
   }
 }

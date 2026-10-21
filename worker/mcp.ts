@@ -5,7 +5,7 @@ import type { Env } from "./env";
 export const ALLOWED_TOOLS = new Set(["house", "press", "lights", "save_preset"]);
 
 const PROTOCOL_VERSION = "2025-06-18";
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 15_000;
 
 // Tailscale Funnel or the room server did not answer usefully: the PC is off,
 // Tailscale or the room server is down, or the token is wrong.
@@ -17,7 +17,7 @@ export class ToolFailed extends Error {}
 // notification, then tools/call. Returns the tool's structured result.
 export async function callTool<T>(
   env: Env, name: string, args: Record<string, unknown> = {},
-  fetchFn: typeof fetch = fetch,
+  fetchFn: typeof fetch = fetch, timeoutMs: number = TIMEOUT_MS,
 ): Promise<T> {
   if (!ALLOWED_TOOLS.has(name)) throw new Error(`tool not allowed: ${name}`);
 
@@ -32,7 +32,7 @@ export async function callTool<T>(
     try {
       res = await fetchFn(env.ROOM_URL, {
         method: "POST", headers, body: JSON.stringify(body),
-        redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS),
+        redirect: "manual", signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
       throw new RoomUnreachable(`fetch failed: ${(e as Error).message}`);

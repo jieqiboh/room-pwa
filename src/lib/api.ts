@@ -7,6 +7,7 @@ export interface DeviceView {
   id: string; name: string; kind: string
   buttons: Button[]
   presets: string[]
+  repeat: string[]
   last_action: string | null; sent_at: string | null
   on: boolean | null; brightness: number | null; error: string | null
   by: string | null
@@ -48,8 +49,8 @@ export const getHouse = () => request<HouseState>('/api/house')
 
 export const saveLayout = (l: Layout) => request<Layout>('/api/layout', send('PUT', l))
 
-export const press = (device: string, button: string) =>
-  request<{ last: Last }>('/api/press', send('POST', { device, button }))
+export const press = (device: string, button: string, times = 1) =>
+  request<{ last: Last }>('/api/press', send('POST', times > 1 ? { device, button, times } : { device, button }))
 
 export const setLights = (device: string, opts: { on?: boolean; brightness?: number; preset?: string }) =>
   request<{ done: string; note: string | null }>('/api/lights', send('POST', { device, ...opts }))

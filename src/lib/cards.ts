@@ -15,3 +15,6 @@ export function cardView(
   }
   return { ...none, buttons: device.buttons, presets: [] }
 }
+
+export const isRepeat = (device: DeviceView | undefined, id: string): boolean =>
+  !!device?.repeat?.includes(id)

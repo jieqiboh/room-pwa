@@ -3,7 +3,7 @@ import { addCard, addPage, moveCard, removeCard, removePage, renamePage, toggleP
 import type { DeviceView, Layout } from "../src/lib/api";
 
 const dev = (over: Partial<DeviceView>): DeviceView => ({
-  id: "d", name: "D", kind: "shutter", buttons: [], presets: [],
+  id: "d", name: "D", kind: "shutter", buttons: [], presets: [], repeat: [],
   last_action: null, sent_at: null, on: null, brightness: null, error: null, by: null, ...over,
 });
 const base = (): Layout => ({

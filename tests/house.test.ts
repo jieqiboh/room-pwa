@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getHouse, MESSAGES, postLights, postPress, postPreset, RATE_LIMIT, RATE_WINDOW_MS } from "../worker/house";
 import { putLayout } from "../worker/layout";
 import { env, fakeRoom } from "./helpers";
@@ -15,6 +15,63 @@ describe("POST /api/press", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).last).toMatchObject({ action: "down", by: "Mum" });
     expect(room.calls).toEqual([{ name: "press", args: { device: "shutter", button: "down" } }]);
+  });
+
+  it("passes times to the room server and logs it", async () => {
+    const room = fakeRoom();
+    const e = env();
+    const req = new Request("https://app.test/api/press", {
+      method: "POST", body: JSON.stringify({ device: "fan", button: "speed_up", times: 5 }),
+    });
+    expect((await postPress(req, e, "Mum", room.fetch)).status).toBe(200);
+    expect(room.calls).toEqual([{ name: "press", args: { device: "fan", button: "speed_up", times: 5 } }]);
+    const row = await e.DB.prepare("SELECT action FROM presses").first<any>();
+    expect(row.action).toBe("speed_up ×5");
+  });
+
+  it("treats times 1 as a plain press", async () => {
+    const room = fakeRoom();
+    const e = env();
+    const req = new Request("https://app.test/api/press", {
+      method: "POST", body: JSON.stringify({ device: "fan", button: "on", times: 1 }),
+    });
+    expect((await postPress(req, e, "Mum", room.fetch)).status).toBe(200);
+    expect(room.calls).toEqual([{ name: "press", args: { device: "fan", button: "on" } }]);
+    expect((await e.DB.prepare("SELECT action FROM presses").first<any>()).action).toBe("on");
+  });
+
+  it("allows a repeated press longer to finish", async () => {
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      const body = (times?: number) => new Request("https://app.test/api/press", {
+        method: "POST", body: JSON.stringify({ device: "fan", button: "speed_up", times }),
+      });
+      await postPress(body(3), env(), "Mum", fakeRoom().fetch);
+      expect(new Set(spy.mock.calls.map((c) => c[0]))).toEqual(new Set([25_000]));
+      spy.mockClear();
+      await postPress(body(), env(), "Mum", fakeRoom().fetch);
+      expect(new Set(spy.mock.calls.map((c) => c[0]))).toEqual(new Set([15_000]));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("defaults a missing repeat to an empty list in the house", async () => {
+    const res = await getHouse(env(), "Mum", fakeRoom().fetch);
+    for (const d of (await res.json()).devices) expect(d.repeat).toEqual([])
+  });
+
+  it("rejects a bad times", async () => {
+    const room = fakeRoom();
+    for (const times of [0, 25, 2.5, "3", null, -1]) {
+      const req = new Request("https://app.test/api/press", {
+        method: "POST", body: JSON.stringify({ device: "fan", button: "speed_up", times }),
+      });
+      const res = await postPress(req, env(), "Mum", room.fetch);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe(MESSAGES.badRequest);
+    }
+    expect(room.requests).toHaveLength(0);
   });
 
   it("rejects a malformed body without contacting the room server", async () => {

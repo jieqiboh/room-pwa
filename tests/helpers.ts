@@ -40,13 +40,13 @@ export interface FakeRoom {
 
 interface FakeDevice {
   id: string; name: string; kind: string;
-  buttons: { id: string; label: string }[]; presets: string[];
+  buttons: { id: string; label: string }[]; presets: string[]; repeat: string[];
   last_action: string | null; sent_at: string | null;
   on: boolean | null; brightness: number | null; error: string | null;
 }
 
 const device = (id: string, name: string, kind: string, buttons: string[] = [], presets: string[] = []): FakeDevice => ({
-  id, name, kind, buttons: buttons.map((b) => ({ id: b, label: b })), presets,
+  id, name, kind, buttons: buttons.map((b) => ({ id: b, label: b })), presets, repeat: [],
   last_action: null, sent_at: null, on: null, brightness: null, error: null,
 });
 

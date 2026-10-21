@@ -66,7 +66,8 @@
     }
   }
 
-  const onpress = (device: string, button: string) => run(async () => { await press(device, button) })
+  const onpress = (device: string, button: string, times = 1) =>
+    run(async () => { await press(device, button, times) })
   const onlights = (device: string, opts: { on?: boolean; brightness?: number; preset?: string }) =>
     run(async () => { await setLights(device, opts) })
   // Saves the lights as a preset, then puts its button on this card of the current page.
