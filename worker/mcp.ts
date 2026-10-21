@@ -1,8 +1,8 @@
 import type { Env } from "./env";
 
-// The room server also runs the lights and the aircon. This list is the line that
-// keeps them out of the family app: nothing else is ever sent to the room server.
-export const ALLOWED_TOOLS = new Set(["shutter", "shutter_status"]);
+// The house server's three tools. This list is the line that keeps the room
+// server's other tools out of the family app: nothing else is ever sent to it.
+export const ALLOWED_TOOLS = new Set(["house", "press", "lights"]);
 
 const PROTOCOL_VERSION = "2025-06-18";
 const TIMEOUT_MS = 10_000;

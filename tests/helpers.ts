@@ -31,14 +31,35 @@ export function env(overrides: Partial<Env> = {}): Env {
 
 export interface FakeRoom {
   fetch: typeof fetch;
-  calls: { name: string; args: unknown }[];
+  calls: { name: string; args: any }[];
   requests: { headers: Headers; body: any }[];
   fail?: "rm4" | "down" | "html";
+  // When set, every send gets this sent_at instead of a fresh one.
+  sentAt?: string;
 }
 
-// The room server as the Python MCP SDK answers: SSE replies and a session id.
+interface FakeDevice {
+  id: string; name: string; kind: string;
+  buttons: { id: string; label: string }[]; presets: string[];
+  last_action: string | null; sent_at: string | null;
+  on: boolean | null; brightness: number | null; error: string | null;
+}
+
+const device = (id: string, name: string, kind: string, buttons: string[] = [], presets: string[] = []): FakeDevice => ({
+  id, name, kind, buttons: buttons.map((b) => ({ id: b, label: b })), presets,
+  last_action: null, sent_at: null, on: null, brightness: null, error: null,
+});
+
+// The room server as the Python MCP SDK answers: SSE replies and a session id,
+// with the house tools (house, press, lights).
 export function fakeRoom(): FakeRoom {
-  let last: { last_action: string | null; sent_at: string | null } = { last_action: null, sent_at: null };
+  const devices = [
+    device("shutter", "Shutter", "shutter", ["up", "down", "stop"]),
+    device("aircon", "Aircon", "aircon", ["on", "off"]),
+    device("fan", "Fan", "fan", ["on", "off"]),
+    device("heater", "Heater", "aircon", ["on", "off"]),
+    device("jq-lights", "JQ lights", "lights", [], ["night"]),
+  ];
   let second = 0;
   const room: FakeRoom = {
     calls: [],
@@ -62,10 +83,15 @@ export function fakeRoom(): FakeRoom {
       if (!body.id) return new Response(null, { status: 202 });
       const { name, arguments: args } = body.params;
       room.calls.push({ name, args });
-      if (name === "shutter_status") return sse({ result: { structuredContent: { ...last, note: "" } } });
+      if (name === "house") return sse({ result: { structuredContent: { devices } } });
       if (room.fail === "rm4") return sse({ result: { isError: true, content: [{ type: "text", text: "RM4 timeout" }] } });
-      last = { last_action: args.action, sent_at: `2026-10-21T21:04:${String(second++).padStart(2, "0")}+08:00` };
-      return sse({ result: { structuredContent: { action: args.action, sent_at: last.sent_at } } });
+      const target = devices.find((d) => d.id === args.device);
+      if (name === "lights") {
+        return sse({ result: { structuredContent: { target: target?.name ?? args.device, done: true, note: "" } } });
+      }
+      const sentAt = room.sentAt ?? `2026-10-21T21:04:${String(second++).padStart(2, "0")}+08:00`;
+      if (target) { target.last_action = args.button; target.sent_at = sentAt; }
+      return sse({ result: { structuredContent: { action: args.button, sent_at: sentAt } } });
     }) as typeof fetch,
   };
   return room;
