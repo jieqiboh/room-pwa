@@ -16,13 +16,13 @@
       "binding": "DB",
       "database_name": "room-pwa",
       // Fill in after `wrangler d1 create room-pwa`.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "977ac6ee-bb5d-4d3b-87e7-6b96685004b6",
       "migrations_dir": "./migrations"
     }
   ],
   "vars": {
     // The room server's MCP endpoint, published by Tailscale Funnel on the home PC.
-    "ROOM_URL": "https://<pc>.<tailnet>.ts.net/mcp"
+    "ROOM_URL": "https://jieqiboh.tail568a82.ts.net/mcp"
   }
   // Secrets (wrangler secret put): SITE_PASSWORD, ROOM_TOKEN.
 }
