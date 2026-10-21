@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { json } from "./util";
 import { userName, handleLogin, handleLogout, loginPage } from "./auth";
 import { getShutter, postShutter } from "./shutter";
+import { getLayout, putLayout } from "./layout";
 
 // The Worker handles /api/shutter and falls through to the static assets (dist/)
 // for everything else. A shared-password gate fronts everything, so nothing
@@ -26,6 +27,8 @@ export default {
       try {
         if (pathname === "/api/shutter" && req.method === "GET") return await getShutter(env, name);
         if (pathname === "/api/shutter" && req.method === "POST") return await postShutter(req, env, name);
+        if (pathname === "/api/layout" && req.method === "GET") return json(await getLayout(env, name));
+        if (pathname === "/api/layout" && req.method === "PUT") return await putLayout(req, env, name);
         return json({ error: "not found" }, 404);
       } catch {
         return json({ error: "Something went wrong. Try again." }, 500);
