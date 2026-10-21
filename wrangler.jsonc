@@ -21,8 +21,8 @@
     }
   ],
   "vars": {
-    // The room server's MCP endpoint, published by Tailscale Funnel on the home PC.
-    "ROOM_URL": "https://jieqiboh.tail568a82.ts.net/mcp"
+    // The room server's house endpoint, published by Tailscale Funnel on the home PC.
+    "ROOM_URL": "https://jieqiboh.tail568a82.ts.net/house/mcp"
   }
   // Secrets (wrangler secret put): SITE_PASSWORD, ROOM_TOKEN.
 }

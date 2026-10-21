@@ -9,7 +9,7 @@ phone ──▶ Worker (shared password) ──▶ Tailscale Funnel (bearer toke
 
 The Worker runs in Cloudflare's data centres and can't reach the house on its own. Tailscale Funnel gives the room server on the home PC a public HTTPS address (`https://<pc>.<tailnet>.ts.net`) that the Worker calls. No domain, port forwarding or DNS changes are needed.
 
-**Security:** the Funnel address is public, and the room server's bearer token is its only lock. That token is a long random secret, but anyone holding it could reach the whole room server, including the lights and the aircon, not only the shutter. Keep it only on the PC, in the Worker's secrets and in the bot's config. The Worker itself only ever calls the shutter tools.
+**Security:** the Funnel address is public, and the room server's bearer tokens are its only lock. They are long random secrets. The Worker uses the house token (`ROOM_HOUSE_TOKEN`), which unlocks every device on the house list (`~/.config/room/house.json`): all shutters, aircon, fans and lights, in every room. Keep it only on the PC and in the Worker's secrets. The bot token (`ROOM_TOKEN`) stays limited to JQ's room and is shared only with the Telegram bot.
 
 Placeholders used below:
 - `<you>@<pc>`: how you ssh to the home PC (Ubuntu, `jieqiboh`)
@@ -53,19 +53,19 @@ Placeholders used below:
    ```
    Optionally, make the same change in `servers/room/room.service` in agent-platform so the repo matches the PC.
 
-**Check** from the Mac, with Tailscale **off** on the Mac (so you go through the public internet like the Worker does). The first command loads the room token from the PC into this shell without printing it, so run it while Tailscale is still on:
+**Check** from the Mac, with Tailscale **off** on the Mac (so you go through the public internet like the Worker does). The first command loads the house token from the PC into this shell without printing it, so run it while Tailscale is still on:
 ```sh
-export ROOM_TOKEN=$(ssh <you>@<pc> 'sed -n "s/^ROOM_TOKEN=//p" ~/.config/room/env')
+export ROOM_HOUSE_TOKEN=$(ssh <you>@<pc> 'sed -n "s/^ROOM_HOUSE_TOKEN=//p" ~/.config/room/env')
 # now turn Tailscale off on the Mac, then:
 
 # Should print HTTP 200 and an "initialize" result:
-curl -s -i https://<pc>.<tailnet>.ts.net/mcp \
-  -H "Authorization: Bearer $ROOM_TOKEN" -H 'content-type: application/json' \
+curl -s -i https://<pc>.<tailnet>.ts.net/house/mcp \
+  -H "Authorization: Bearer $ROOM_HOUSE_TOKEN" -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}' | head -20
 
 # Without the token it should be refused (401):
-curl -s -o /dev/null -w '%{http_code}\n' https://<pc>.<tailnet>.ts.net/mcp
+curl -s -o /dev/null -w '%{http_code}\n' https://<pc>.<tailnet>.ts.net/house/mcp
 ```
 A brand-new Funnel name can take a few minutes to appear in public DNS. If `curl` can't resolve the name, wait and retry. If the first command returns 421 or "Invalid Host header", step 2 hasn't taken effect yet.
 
@@ -80,29 +80,30 @@ A brand-new Funnel name can take a few minutes to appear in public DNS. If `curl
    ```
 2. Edit [wrangler.jsonc](wrangler.jsonc):
    - `database_id`: the ID that `d1 create` printed.
-   - `ROOM_URL`: `"https://<pc>.<tailnet>.ts.net/mcp"`.
+   - `ROOM_URL`: `"https://<pc>.<tailnet>.ts.net/house/mcp"`.
 3. Deploy. This builds the app, applies the D1 migration and deploys the Worker:
    ```sh
    npm run deploy
    ```
    If wrangler asks you to register a workers.dev subdomain, pick one. Note the URL it prints: `https://room-pwa.<subdomain>.workers.dev`.
-4. Add the secrets. Pick a family password that's long but easy to type on a phone, such as three random words. The room token is piped straight from the PC so it never appears on screen:
+4. Add the secrets. Pick a family password that's long but easy to type on a phone, such as three random words. The house token is piped straight from the PC so it never appears on screen. The Worker's secret is still named `ROOM_TOKEN`, but its value is the house token:
    ```sh
    npx wrangler secret put SITE_PASSWORD                # type the family password
-   ssh <you>@<pc> 'sed -n "s/^ROOM_TOKEN=//p" ~/.config/room/env' | npx wrangler secret put ROOM_TOKEN
+   ssh <you>@<pc> 'sed -n "s/^ROOM_HOUSE_TOKEN=//p" ~/.config/room/env' | npx wrangler secret put ROOM_TOKEN
    ```
 
-**Check:** open `https://room-pwa.<subdomain>.workers.dev` on the Mac. You should see the Shutter sign-in page.
+**Check:** open `https://room-pwa.<subdomain>.workers.dev` on the Mac. You should see the sign-in page.
 
 ## Part D: Test for real and install on phones
 
-1. On your phone, open `https://room-pwa.<subdomain>.workers.dev`, type your name (for example `JQ`) and the family password. You should see "Last sent: …" or "Nothing sent yet."
-2. Press **Stop** (safe when the shutter isn't moving). The line should say "by JQ", and Telegram's `rstatus` should show the same command.
-3. Press **Up** or **Down** once and watch the shutter move.
+1. On your phone, open `https://room-pwa.<subdomain>.workers.dev`, type your name (for example `JQ`) and the family password. You should see the page menu with no pages yet.
+2. Make a page named after yourself with the editor: add a shutter, the aircon and the lights. Each device is one card with its buttons.
+3. Press **Stop** on the shutter card (safe when the shutter isn't moving). The card should say "Last: Stop · … by JQ", and Telegram's `rstatus` should show the same command.
+4. Press **Up** or **Down** once and watch the shutter move. Try the aircon and lights too.
 4. Add it to the home screen:
    - iPhone: in **Safari**, Share → **Add to Home Screen**.
    - Android: in Chrome, menu → **Install app**.
-5. Repeat steps 1 and 4 on each family member's phone, with each person typing their own name. They stay signed in for a year. Tell them: "It shows the last button pressed, not whether the shutter is open. The wall remote and the Telegram bot move it too. If it says 'Can't reach home', the PC is off; use the wall remote."
+5. Repeat steps 1, 2 and 5 on each family member's phone, with each person typing their own name and making their own page. They stay signed in for a year. Tell them: "Each card shows the last button pressed and who pressed it, not whether the shutter is open or the aircon is on. The wall remote and the Telegram bot work the devices too. If it says 'Can't reach home', the PC is off; use the wall remote."
 
 ## Adding someone, or locking someone out
 
@@ -113,13 +114,30 @@ A brand-new Funnel name can take a few minutes to appear in public DNS. If `curl
   ```
 - **Someone on the wrong name:** tap "Not Mum?" in the app's top-right corner and sign in again.
 
-## If the room token ever leaks
+## Adding a device to the house
 
-Make a new one on the PC, restart the room server, then give it to both the Worker and the Telegram bot. Repeat step 7 of agent-platform's `servers/room/SETUP.md` for the bot.
+Follow agent-platform's `servers/room/README.md`. In short, on the PC:
+
+1. Record the device's buttons with `learn_ir.py`: `--codes` for the button codes, and also `--rf` for shutters.
+2. Add an entry for it to `~/.config/room/house.json`.
+3. Restart the room server:
+   ```sh
+   sudo systemctl restart room
+   ```
+
+Then add a card for it in the app's page editor.
+
+## If a room token ever leaks
+
+There are two tokens in `~/.config/room/env`. `ROOM_HOUSE_TOKEN` is shared only with this Worker. `ROOM_TOKEN` is the bot token, shared only with the Telegram bot. Replace the one that leaked (or both), restart the room server, then give the new value to whoever uses it.
+
+House token (the Worker; its secret is still named `ROOM_TOKEN`):
 ```sh
-ssh <you>@<pc> '(umask 077; sed -i "s/^ROOM_TOKEN=.*/ROOM_TOKEN=$(python3 -c "import secrets;print(secrets.token_urlsafe(32))")/" ~/.config/room/env) && sudo systemctl restart room'
-ssh <you>@<pc> 'sed -n "s/^ROOM_TOKEN=//p" ~/.config/room/env' | npx wrangler secret put ROOM_TOKEN
+ssh <you>@<pc> '(umask 077; sed -i "s/^ROOM_HOUSE_TOKEN=.*/ROOM_HOUSE_TOKEN=$(python3 -c "import secrets;print(secrets.token_urlsafe(32))")/" ~/.config/room/env) && sudo systemctl restart room'
+ssh <you>@<pc> 'sed -n "s/^ROOM_HOUSE_TOKEN=//p" ~/.config/room/env' | npx wrangler secret put ROOM_TOKEN
 ```
+
+Bot token (the Telegram bot): same first command with `ROOM_TOKEN` in place of `ROOM_HOUSE_TOKEN`, then repeat step 7 of agent-platform's `servers/room/SETUP.md` for the bot.
 
 To take the room server off the internet entirely: `sudo tailscale funnel --https=443 off` on the PC.
 
@@ -132,7 +150,7 @@ To take the room server off the internet entirely: `sudo tailscale funnel --http
 | Sign-in page keeps coming back | `SITE_PASSWORD` secret not set (`npx wrangler secret list`), or the phone blocks cookies. |
 | "Too many wrong passwords" | 10 wrong tries from one network in 15 minutes. Wait 15 minutes. |
 | Part B check returns 421 / Invalid Host header | `ROOM_ALLOWED_HOSTS` drop-in not applied: `systemctl cat room` should show it, then restart. |
-| Part B check returns 401 with the token | Wrong `ROOM_TOKEN`. |
+| Part B check returns 401 with the token | Wrong `ROOM_HOUSE_TOKEN`. |
 | Part B check can't connect | Funnel off (`tailscale funnel status`), or the name isn't in public DNS yet. |
 
 ## Where the secrets live
@@ -140,6 +158,7 @@ To take the room server off the internet entirely: `sudo tailscale funnel --http
 | Secret | Stored in |
 |---|---|
 | Family password | The Worker secret `SITE_PASSWORD`, and your password manager |
-| Room bearer token | `~/.config/room/env` on the PC, the Worker secret `ROOM_TOKEN`, and the Telegram bot's config |
+| House token | `ROOM_HOUSE_TOKEN` in `~/.config/room/env` on the PC, and the Worker secret `ROOM_TOKEN` |
+| Bot token | `ROOM_TOKEN` in `~/.config/room/env` on the PC, and the Telegram bot's config |
 
 None of these go in git.

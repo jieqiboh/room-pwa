@@ -1,13 +1,13 @@
 # room-pwa
 
-Up / Stop / Down for the roller shutter, as a phone app the family installs. See [PLAN.md](PLAN.md) for the design.
+Room pages: each person makes their own page of device cards (shutters, aircon, fans and Hue lights), with one tap per button, as a phone app the family installs. See [PLAN.md](PLAN.md) for the design.
 
 ```
 phone ──▶ Worker (shared password) ──▶ Tailscale Funnel (bearer token) ──▶ room server :8008 ──▶ RM4
 ```
 
-- `worker/`: the API. `GET/POST /api/shutter` call the room server over MCP ([worker/mcp.ts](worker/mcp.ts)), which only lets `shutter` and `shutter_status` through. Each press is logged in D1 with who sent it, and a person can press 4 times per 10 s at most.
-- `src/`: the Svelte page. `vite-plugin-pwa` makes it installable and caches only scripts, styles and icons, never `/api`.
+- `worker/`: the API. `/api/house`, `/api/press` and `/api/lights` call the room server's house endpoint (`/house/mcp`) over MCP ([worker/mcp.ts](worker/mcp.ts)), with the house token. Each person's pages are stored in D1, each press is logged with who sent it, and a person can press 4 times per 10 s at most.
+- `src/`: the Svelte page, with a page menu and an editor for choosing which devices go on a page. `vite-plugin-pwa` makes it installable and caches only scripts, styles and icons, never `/api`.
 - `dev/fake-room.mjs`: a stand-in room server for local runs.
 
 ## Local development
@@ -28,4 +28,4 @@ See [SETUP.md](SETUP.md) for the full step-by-step instructions (Funnel, deploy,
 
 ## For the family
 
-The buttons send the same signal as the wall remote. "Last sent" shows the last button pressed and who pressed it, not whether the shutter is open: the wall remote and the Telegram bot move it too, and nothing reports where it actually is. If the app says "Can't reach home", the PC at home is off or offline. Use the wall remote.
+The buttons send the same signal as the wall remote. Each card shows the last button pressed and who pressed it, not whether the shutter is open or the aircon is on: the wall remote and the Telegram bot work the devices too, and nothing reports their real state. If the app says "Can't reach home", the PC at home is off or offline. Use the wall remote.
