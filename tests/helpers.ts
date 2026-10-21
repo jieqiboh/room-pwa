@@ -51,7 +51,7 @@ const device = (id: string, name: string, kind: string, buttons: string[] = [], 
 });
 
 // The room server as the Python MCP SDK answers: SSE replies and a session id,
-// with the house tools (house, press, lights, save_preset).
+// with the house tools (house, press, lights, save_preset, batch).
 export function fakeRoom(): FakeRoom {
   const devices = [
     device("shutter", "Shutter", "shutter", ["up", "down", "stop"]),
@@ -85,6 +85,13 @@ export function fakeRoom(): FakeRoom {
       room.calls.push({ name, args });
       if (name === "house") return sse({ result: { structuredContent: { devices } } });
       if (room.fail === "rm4") return sse({ result: { isError: true, content: [{ type: "text", text: "RM4 timeout" }] } });
+      if (name === "batch") {
+        // Each command succeeds unless its device is unknown, as the room server reports it.
+        const results = args.commands.map((c: { device: string }) => devices.some((d) => d.id === c.device)
+          ? { device: c.device, ok: true, error: null }
+          : { device: c.device, ok: false, error: `no device '${c.device}'` });
+        return sse({ result: { structuredContent: { results } } });
+      }
       const target = devices.find((d) => d.id === args.device);
       if (name === "save_preset") return sse({ result: { structuredContent: { name: args.name } } });
       if (name === "lights") {

@@ -1,3 +1,5 @@
+import { toApi, type BatchResult, type Command } from './queue'
+
 export interface Last { action: string; sent_at: string; by: string | null }
 export interface Button { id: string; label: string }
 export interface Card { device: string; picks: string[] }
@@ -57,3 +59,6 @@ export const setLights = (device: string, opts: { on?: boolean; brightness?: num
 
 export const savePreset = (device: string, name: string) =>
   request<{ name: string }>('/api/presets', send('POST', { device, name }))
+
+export const applyBatch = (commands: Command[]) =>
+  request<{ results: BatchResult[] }>('/api/batch', send('POST', { commands: commands.map(toApi) }))

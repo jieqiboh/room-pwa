@@ -6,6 +6,9 @@ import { getLayout } from "./layout";
 // A few presses per person per window, so a stuck button cannot hammer a device.
 export const RATE_LIMIT = 4;
 export const RATE_WINDOW_MS = 10_000;
+// As the room server's batch tool allows.
+export const BATCH_COMMANDS = 20;
+export const BATCH_PRESSES = 48;
 
 export const MESSAGES = {
   unreachable: "Can't reach home. Is the PC on?",
@@ -26,6 +29,7 @@ export interface Device {
 interface House { devices: Device[] }
 interface Sent { action: string; sent_at: string }
 interface Changed { target: string; done: string; note: string | null }
+interface BatchResult { device: string; ok: boolean; error: string | null }
 
 export async function getHouse(env: Env, who: string, fetchFn: typeof fetch = fetch): Promise<Response> {
   const layout = await getLayout(env, who);
@@ -50,22 +54,16 @@ export async function getHouse(env: Env, who: string, fetchFn: typeof fetch = fe
 export async function postPress(
   req: Request, env: Env, who: string, fetchFn: typeof fetch = fetch, now = Date.now(),
 ): Promise<Response> {
-  const body = await readBody(req);
-  const { device, button } = body;
-  if (!nonEmpty(device) || !nonEmpty(button)) return json({ error: MESSAGES.badRequest }, 400);
-  const times = body.times === undefined ? 1 : body.times;
-  if (typeof times !== "number" || !Number.isInteger(times) || times < 1 || times > 24) {
-    return json({ error: MESSAGES.badRequest }, 400);
-  }
+  const args = pressArgs(await readBody(req));
+  if (!args) return json({ error: MESSAGES.badRequest }, 400);
+  const { device, button, times = 1 } = args;
 
   const limited = await rateLimit(env, who, now);
   if (limited) return limited;
 
   const action = times > 1 ? `${button} ×${times}` : button;
   try {
-    const sent = await callTool<Sent>(
-      env, "press", times > 1 ? { device, button, times } : { device, button }, fetchFn,
-      times > 1 ? 25_000 : undefined);
+    const sent = await callTool<Sent>(env, "press", args, fetchFn, times > 1 ? 25_000 : undefined);
     await log(env, who, device, action, now, sent.sent_at, null);
     return json({ last: { action: sent.action, sent_at: sent.sent_at, by: who } });
   } catch (e) {
@@ -77,31 +75,11 @@ export async function postPress(
 export async function postLights(
   req: Request, env: Env, who: string, fetchFn: typeof fetch = fetch, now = Date.now(),
 ): Promise<Response> {
-  const { device, on, brightness, preset } = await readBody(req);
-  const args: Record<string, unknown> = { device };
-  if (!nonEmpty(device)) return json({ error: MESSAGES.badRequest }, 400);
-  if (on !== undefined) {
-    if (typeof on !== "boolean") return json({ error: MESSAGES.badRequest }, 400);
-    args.on = on;
-  }
-  if (brightness !== undefined) {
-    if (!Number.isInteger(brightness) || (brightness as number) < 1 || (brightness as number) > 100) {
-      return json({ error: MESSAGES.badRequest }, 400);
-    }
-    args.brightness = brightness;
-  }
-  if (preset !== undefined) {
-    // A preset stands alone, as in the room server.
-    if (!nonEmpty(preset) || on !== undefined || brightness !== undefined) {
-      return json({ error: MESSAGES.badRequest }, 400);
-    }
-    args.preset = preset;
-  }
-  if (args.on === undefined && args.brightness === undefined && args.preset === undefined) {
-    return json({ error: MESSAGES.badRequest }, 400);
-  }
-  const action = args.preset !== undefined ? `preset ${preset}`
-    : args.brightness !== undefined ? `brightness ${brightness}`
+  const args = lightsArgs(await readBody(req));
+  if (!args) return json({ error: MESSAGES.badRequest }, 400);
+  const { device, on, brightness, preset } = args;
+  const action = preset !== undefined ? `preset ${preset}`
+    : brightness !== undefined ? `brightness ${brightness}`
     : on ? "on" : "off";
 
   const limited = await rateLimit(env, who, now);
@@ -137,6 +115,79 @@ export async function postPreset(
     await log(env, who, device, action, now, null, errorText(e));
     return json({ error: friendly(e) }, 502);
   }
+}
+
+export async function postBatch(
+  req: Request, env: Env, who: string, fetchFn: typeof fetch = fetch, now = Date.now(),
+): Promise<Response> {
+  const { commands: raw } = await readBody(req);
+  const commands = Array.isArray(raw) && raw.length >= 1 && raw.length <= BATCH_COMMANDS
+    ? raw.map(batchArgs) : null;
+  if (!commands || commands.some((c) => c === null)) return json({ error: MESSAGES.badRequest }, 400);
+  const presses = commands.reduce((n, c) => n + ("button" in c! ? (c.times ?? 1) : 0), 0);
+  if (presses > BATCH_PRESSES) return json({ error: MESSAGES.badRequest }, 400);
+  const action = `batch ${commands.length}`;
+
+  // However many commands, a batch is one tap of Apply all: one press for the rate limit.
+  const limited = await rateLimit(env, who, now);
+  if (limited) return limited;
+
+  try {
+    const { results } = await callTool<{ results: BatchResult[] }>(env, "batch", { commands }, fetchFn, 30_000);
+    await log(env, who, "batch", action, now, null, null);
+    return json({ results });
+  } catch (e) {
+    await log(env, who, "batch", action, now, null, errorText(e));
+    return json({ error: friendly(e) }, 502);
+  }
+}
+
+type PressArgs = { device: string; button: string; times?: number };
+type LightsArgs = { device: string; on?: boolean; brightness?: number; preset?: string };
+
+// The room server's press arguments, or null when the body is not a valid press.
+function pressArgs(body: Record<string, unknown>): PressArgs | null {
+  const { device, button } = body;
+  if (!nonEmpty(device) || !nonEmpty(button)) return null;
+  const times = body.times === undefined ? 1 : body.times;
+  if (typeof times !== "number" || !Number.isInteger(times) || times < 1 || times > 24) return null;
+  return times > 1 ? { device, button, times } : { device, button };
+}
+
+// The room server's lights arguments, or null when the body is not a valid change.
+function lightsArgs(body: Record<string, unknown>): LightsArgs | null {
+  const { device, on, brightness, preset } = body;
+  if (!nonEmpty(device)) return null;
+  const args: LightsArgs = { device };
+  if (on !== undefined) {
+    if (typeof on !== "boolean") return null;
+    args.on = on;
+  }
+  if (brightness !== undefined) {
+    if (typeof brightness !== "number" || !Number.isInteger(brightness) || brightness < 1 || brightness > 100) {
+      return null;
+    }
+    args.brightness = brightness;
+  }
+  if (preset !== undefined) {
+    // A preset stands alone, as in the room server.
+    if (!nonEmpty(preset) || on !== undefined || brightness !== undefined) return null;
+    args.preset = preset;
+  }
+  if (args.on === undefined && args.brightness === undefined && args.preset === undefined) return null;
+  return args;
+}
+
+const PRESS_KEYS = new Set(["device", "button", "times"]);
+const LIGHTS_KEYS = new Set(["device", "on", "brightness", "preset"]);
+
+// One batch command: a press when it has a button, otherwise a lights change, with no other keys.
+function batchArgs(c: unknown): PressArgs | LightsArgs | null {
+  if (typeof c !== "object" || c === null || Array.isArray(c)) return null;
+  const body = c as Record<string, unknown>;
+  const press = "button" in body;
+  if (Object.keys(body).some((k) => !(press ? PRESS_KEYS : LIGHTS_KEYS).has(k))) return null;
+  return press ? pressArgs(body) : lightsArgs(body);
 }
 
 async function readBody(req: Request): Promise<Record<string, unknown>> {

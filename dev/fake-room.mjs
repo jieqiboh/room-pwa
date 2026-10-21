@@ -25,6 +25,24 @@ const result = (structuredContent) => ({
   content: [{ type: 'text', text: JSON.stringify(structuredContent) }], structuredContent, isError: false,
 })
 
+// The press and lights fakes: change the device, or return why not.
+function press(args) {
+  const d = devices.find((x) => x.id === args.device)
+  if (!d || !d.buttons.some((b) => b.id === args.button)) return 'unknown device or button'
+  d.last_action = args.button
+  d.sent_at = new Date().toISOString().replace(/\.\d+Z$/, '+00:00')
+  return null
+}
+
+function lights(args) {
+  const d = devices.find((x) => x.id === args.device && x.kind === 'lights')
+  if (!d) return 'unknown lights'
+  if (args.on !== undefined) d.on = args.on
+  if (args.brightness !== undefined) { d.brightness = args.brightness; d.on = true }
+  if (args.preset !== undefined) { d.on = true; d.brightness = 70 }
+  return null
+}
+
 createServer(async (req, res) => {
   if (req.url === '/calls') return res.end(JSON.stringify(calls))
   if (req.url !== '/mcp') return res.writeHead(404).end()
@@ -48,6 +66,14 @@ createServer(async (req, res) => {
   const { name, arguments: args } = msg.params
   calls.push(name)
   console.log('tools/call', name, args)
+  if (name === 'batch') {
+    // Each command through the press or lights fake below, as the room server runs them.
+    const results = args.commands.map(({ button, times, ...c }) => {
+      const err = button !== undefined ? press({ ...c, button }) : lights(c)
+      return { device: c.device, ok: !err, error: err ?? null }
+    })
+    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ results }) })
+  }
   if (name === 'house') {
     if (process.env.FAIL === 'rm4') {
       return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'RM4 did not respond' }], isError: true } })
@@ -55,22 +81,15 @@ createServer(async (req, res) => {
     return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ devices }) })
   }
   if (name === 'press') {
+    const err = press(args)
+    if (err) return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: err }], isError: true } })
     const d = devices.find((x) => x.id === args.device)
-    if (!d || !d.buttons.some((b) => b.id === args.button)) {
-      return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'unknown device or button' }], isError: true } })
-    }
-    const sent_at = new Date().toISOString().replace(/\.\d+Z$/, '+00:00')
-    d.last_action = args.button
-    d.sent_at = sent_at
-    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ action: args.button, sent_at }) })
+    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ action: d.last_action, sent_at: d.sent_at }) })
   }
   if (name === 'lights') {
-    const d = devices.find((x) => x.id === args.device && x.kind === 'lights')
-    if (!d) return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'unknown lights' }], isError: true } })
-    if (args.on !== undefined) d.on = args.on
-    if (args.brightness !== undefined) { d.brightness = args.brightness; d.on = true }
-    if (args.preset !== undefined) { d.on = true; d.brightness = 70 }
-    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ target: d.id, done: true, note: 'fake' }) })
+    const err = lights(args)
+    if (err) return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: err }], isError: true } })
+    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ target: args.device, done: true, note: 'fake' }) })
   }
   if (name === 'shutter_status') return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ ...last, note: 'fake', choices: ['down', 'stop', 'up'] }) })
   if (name === 'shutter') {

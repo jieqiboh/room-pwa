@@ -3,7 +3,8 @@
   import DeviceCard from './DeviceCard.svelte'
   import PageEditor from './PageEditor.svelte'
   import { addPage } from './lib/layout'
-  import { getHouse, press, saveLayout, savePreset, setLights, SignedOut, type DeviceView, type HouseState, type Layout } from './lib/api'
+  import { applyBatch, getHouse, press, saveLayout, savePreset, setLights, SignedOut, type DeviceView, type HouseState, type Layout } from './lib/api'
+  import { commands, firstError, queueLights, queuePress, remove, settle, type LightsChange, type Queue } from './lib/queue'
 
   let house = $state<HouseState | null>(null)
   let busy = $state(false)
@@ -38,7 +39,10 @@
 
   async function refresh() {
     try {
+      const shown = page?.id
       house = await getHouse()
+      // Another device switched this person's page: the queue was for the old one.
+      if (shown !== undefined && page?.id !== shown) queue = {}
       error = house.reachable ? null : (house.error ?? null)
       if (house.reachable) {
         cached = house.devices
@@ -66,10 +70,47 @@
     }
   }
 
-  const onpress = (device: string, button: string, times = 1) =>
-    run(async () => { await press(device, button, times) })
-  const onlights = (device: string, opts: { on?: boolean; brightness?: number; preset?: string }) =>
-    run(async () => { await setLights(device, opts) })
+  // Taps queue a command per device; Apply all sends them together. Kept only while on this page.
+  let queue = $state<Queue>({})
+  const queuedCount = $derived(commands(queue).length)
+
+  const onqueuepress = (device: string, button: string, times = 1) => {
+    if (!busy) queue = queuePress(queue, device, button, times)
+  }
+  const onqueuelights = (device: string, change: LightsChange) => {
+    if (!busy) queue = queueLights(queue, device, change)
+  }
+  // Tapping a queued (amber) control sends that device's command now, by itself.
+  const onsend = (device: string) => {
+    const c = queue[device]
+    if (!c) return
+    run(async () => {
+      if (c.kind === 'press') await press(device, c.button, c.times)
+      else await setLights(device, { on: c.on, brightness: c.brightness, preset: c.preset })
+      queue = remove(queue, device)
+    })
+  }
+
+  async function applyAll() {
+    if (busy || queuedCount === 0 || !house?.reachable) return
+    busy = true
+    error = null
+    let bad: string | null = null
+    try {
+      const { results } = await applyBatch(commands(queue))
+      queue = settle(queue, results)
+      bad = firstError(results)
+      if (bad) error = bad
+      else navigator.vibrate?.(30)
+    } catch (e) {
+      fail(e)
+      return
+    } finally {
+      busy = false
+    }
+    await refresh()
+    if (bad) error = bad
+  }
   // Saves the lights as a preset, then puts its button on this card of the current page.
   const onsavepreset = (device: string, name: string) =>
     run(async () => { await savePreset(device, name) })
@@ -81,6 +122,7 @@
   async function switchTo(id: string) {
     menu = false
     if (!house || house.layout.last === id) return
+    queue = {}
     const before = house.layout
     house.layout = { ...before, last: id }
     try {
@@ -96,18 +138,21 @@
     menu = false
     const name = `Page ${house.layout.pages.length + 1}`
     const { layout, id } = addPage(house.layout, name)
+    queue = {}
     editing = { layout, pageId: id }
   }
 
   function firstPage() {
     if (!house?.me) return
     const { layout, id } = addPage(house.layout, house.me)
+    queue = {}
     editing = { layout, pageId: id }
   }
 
   function editPage() {
     if (!house || !page) return
     menu = false
+    queue = {}
     editing = { layout: house.layout, pageId: page.id }
   }
 
@@ -125,7 +170,7 @@
   })
 </script>
 
-<main>
+<main class:queued={queuedCount > 0 && !editing}>
   <header>
     {#if page && !editing}
       <button class="title" aria-expanded={menu} onclick={() => (menu = !menu)}>{page.name} ▾</button>
@@ -177,13 +222,21 @@
         reachable={!!house?.reachable}
         {busy}
         disabled={signedOut || !house?.reachable}
-        {onpress}
-        {onlights}
+        {queue}
+        {onqueuepress}
+        {onqueuelights}
+        {onsend}
         {onsavepreset}
       />
     {/each}
     {#if page.cards.length === 0}
       <button class="link" onclick={editPage} disabled={signedOut}>Add devices</button>
+    {/if}
+    {#if queuedCount > 0 && !menu}
+      <div class="applybar">
+        <button class="apply" disabled={busy || signedOut || !house?.reachable} onclick={applyAll}>Apply all ({queuedCount})</button>
+        <button class="clear" disabled={busy} onclick={() => (queue = {})}>Clear</button>
+      </div>
     {/if}
   {/if}
 </main>
@@ -230,4 +283,34 @@
   .menu button.act { color: #60a5fa; }
   .menu button:disabled { opacity: 0.5; }
   .menu hr { border: none; border-top: 1px solid #374151; margin: 6px 0; }
+  /* Room below the last card for the apply bar. */
+  main.queued { padding-bottom: calc(env(safe-area-inset-bottom) + 96px); }
+  .applybar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5; /* under the repeat sheet (9, 10) */
+    display: flex;
+    gap: 8px;
+    max-width: 480px;
+    margin: 0 auto;
+    box-sizing: border-box;
+    padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
+    background: var(--bg);
+    border-top: 1px solid #374151;
+  }
+  .applybar button {
+    min-height: 48px;
+    border: none;
+    border-radius: 12px;
+    color: var(--fg);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .applybar .apply { flex: 2 1 0; background: #2563eb; }
+  .applybar .clear { flex: 1 1 0; background: var(--button); }
+  .applybar button:active { filter: brightness(1.15); }
+  .applybar button:disabled { opacity: 0.5; }
 </style>

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getHouse, MESSAGES, postLights, postPress, postPreset, RATE_LIMIT, RATE_WINDOW_MS } from "../worker/house";
+import { getHouse, MESSAGES, postBatch, postLights, postPress, postPreset, RATE_LIMIT, RATE_WINDOW_MS } from "../worker/house";
 import { putLayout } from "../worker/layout";
 import { env, fakeRoom } from "./helpers";
 
@@ -219,6 +219,112 @@ describe("POST /api/lights", () => {
   });
 });
 
+const batch = (commands: unknown) =>
+  new Request("https://app.test/api/batch", { method: "POST", body: JSON.stringify({ commands }) });
+
+describe("POST /api/batch", () => {
+  it("sends every command in one call and logs one press", async () => {
+    const e = env();
+    const room = fakeRoom();
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    let res: Response;
+    try {
+      res = await postBatch(batch([
+        { device: "shutter", button: "down" },
+        { device: "fan", button: "speed_up", times: 5 },
+        { device: "jq-lights", on: true, brightness: 40 },
+        { device: "jq-lights", preset: "night" },
+      ]), e, "Mum", room.fetch);
+      expect(new Set(spy.mock.calls.map((c) => c[0]))).toEqual(new Set([30_000]));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ results: [
+      { device: "shutter", ok: true, error: null }, { device: "fan", ok: true, error: null },
+      { device: "jq-lights", ok: true, error: null }, { device: "jq-lights", ok: true, error: null }] });
+    expect(room.calls).toEqual([{ name: "batch", args: { commands: [
+      { device: "shutter", button: "down" },
+      { device: "fan", button: "speed_up", times: 5 },
+      { device: "jq-lights", on: true, brightness: 40 },
+      { device: "jq-lights", preset: "night" },
+    ] } }]);
+    const rows = await e.DB.prepare("SELECT who, device, action, sent_at, error FROM presses").all<any>();
+    expect(rows.results).toEqual([{ who: "Mum", device: "batch", action: "batch 4", sent_at: null, error: null }]);
+  });
+
+  it("passes a partial failure through", async () => {
+    const room = fakeRoom();
+    const res = await postBatch(batch([{ device: "gone", button: "up" }, { device: "shutter", button: "up" }]),
+      env(), "Mum", room.fetch);
+    expect(res.status).toBe(200);
+    const { results } = await res.json();
+    expect(results.map((r: any) => r.ok)).toEqual([false, true]);
+    expect(results[0].error).toMatch(/no device/);
+  });
+
+  it("rejects a bad body without contacting the room server", async () => {
+    const e = env();
+    const room = fakeRoom();
+    const ok = { device: "shutter", button: "up" };
+    const bodies: unknown[] = [
+      undefined, null, "x", {}, [], Array(21).fill(ok),
+      [{}], [{ device: "" , button: "up" }], [{ device: 5, button: "up" }], [null], ["shutter"],
+      [{ device: "shutter", button: "" }], [{ device: "shutter", button: 3 }],
+      ...[0, 25, 2.5, "3", null, -1].map((times) => [{ device: "fan", button: "speed_up", times }]),
+      [{ device: "fan", button: "up", on: true }],
+      [{ device: "jq-lights" }], [{ device: "jq-lights", brightness: 0 }], [{ device: "jq-lights", brightness: 101 }],
+      [{ device: "jq-lights", brightness: "bright" }], [{ device: "jq-lights", on: "yes" }],
+      [{ device: "jq-lights", preset: "" }], [{ device: "jq-lights", preset: "night", on: true }],
+      [{ device: "jq-lights", preset: "night", brightness: 30 }],
+      [{ device: "jq-lights", on: true, colour: "red" }],
+      [{ device: "fan", button: "a", times: 24 }, { device: "fan", button: "b", times: 24 }, ok],
+    ];
+    for (const commands of bodies) {
+      const res = await postBatch(batch(commands), e, "Mum", room.fetch);
+      expect(res.status, JSON.stringify(commands)).toBe(400);
+      expect((await res.json()).error).toBe(MESSAGES.badRequest);
+    }
+    const junk = new Request("https://app.test/api/batch", { method: "POST", body: "nope" });
+    expect((await postBatch(junk, e, "Mum", room.fetch)).status).toBe(400);
+    expect(room.requests).toHaveLength(0);
+    expect((await e.DB.prepare("SELECT COUNT(*) AS n FROM presses").first<any>()).n).toBe(0);
+    expect((await postBatch(batch(Array(20).fill(ok)), e, "Mum", room.fetch)).status).toBe(200);
+  });
+
+  it("is rate limited as one press", async () => {
+    const e = env();
+    const room = fakeRoom();
+    const t0 = 1_000_000;
+    const big = Array(10).fill({ device: "shutter", button: "stop" });
+    for (let i = 0; i < RATE_LIMIT - 1; i++) {
+      expect((await postBatch(batch(big), e, "Kid", room.fetch, t0 + i)).status).toBe(200);
+    }
+    expect((await postPress(press("shutter", "stop"), e, "Kid", room.fetch, t0 + 4)).status).toBe(200);
+    const limited = await postBatch(batch(big), e, "Kid", room.fetch, t0 + 5);
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error).toBe(MESSAGES.rateLimited);
+    expect(room.calls.filter((c) => c.name === "batch")).toHaveLength(RATE_LIMIT - 1);
+  });
+
+  it("explains a room that is down or a failed call, and logs it", async () => {
+    const e = env();
+    const room = fakeRoom();
+    room.fail = "down";
+    const res = await postBatch(batch([{ device: "shutter", button: "up" }]), e, "Mum", room.fetch);
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toBe(MESSAGES.unreachable);
+    room.fail = "rm4";
+    const tool = await postBatch(batch([{ device: "shutter", button: "up" }]), e, "Mum", room.fetch);
+    expect(tool.status).toBe(502);
+    expect((await tool.json()).error).toBe(MESSAGES.toolFailed);
+    const rows = await e.DB.prepare("SELECT device, action, sent_at, error FROM presses").all<any>();
+    expect(rows.results).toHaveLength(2);
+    for (const r of rows.results) expect(r).toMatchObject({ device: "batch", action: "batch 1", sent_at: null });
+    expect(rows.results[0].error).toBeTruthy();
+  });
+});
+
 describe("GET /api/house", () => {
   it("returns layout, devices and who pressed", async () => {
     const e = env();
@@ -279,8 +385,10 @@ describe("room server access", () => {
     await postPress(press("shutter", "up"), e, "Mum", room.fetch);
     await postLights(lights({ device: "jq-lights", on: true }), e, "Mum", room.fetch);
     await postPreset(preset({ device: "jq-lights", name: "x" }), e, "Mum", room.fetch);
+    await postBatch(batch([{ device: "shutter", button: "up" }]), e, "Mum", room.fetch);
     await getHouse(e, "Mum", room.fetch);
     expect(room.calls.length).toBeGreaterThan(0);
-    for (const c of room.calls) expect(["house", "press", "lights", "save_preset"]).toContain(c.name);
+    for (const c of room.calls) expect(["house", "press", "lights", "save_preset", "batch"]).toContain(c.name);
+    expect(room.calls.some((c) => c.name === "batch")).toBe(true);
   });
 });

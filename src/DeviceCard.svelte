@@ -1,19 +1,30 @@
 <script lang="ts">
   import type { Card, DeviceView } from './lib/api'
   import { cardView, isRepeat } from './lib/cards'
+  import { isQueued, queuedLights, type LightsChange, type Queue } from './lib/queue'
 
-  type LightsOpts = { on?: boolean; brightness?: number; preset?: string }
   interface Props {
     card: Card
     device: DeviceView | undefined
     busy: boolean
     disabled?: boolean
     reachable?: boolean
-    onpress: (device: string, button: string, times?: number) => void
-    onlights: (device: string, opts: LightsOpts) => void
+    queue: Queue
+    onqueuepress: (device: string, button: string, times?: number) => void
+    onqueuelights: (device: string, change: LightsChange) => void
+    onsend: (device: string) => void
     onsavepreset: (device: string, name: string) => Promise<boolean>
   }
-  let { card, device, busy, disabled = false, reachable = true, onpress, onlights, onsavepreset }: Props = $props()
+  let {
+    card, device, busy, disabled = false, reachable = true, queue, onqueuepress, onqueuelights, onsend, onsavepreset,
+  }: Props = $props()
+
+  // Queued (amber) lights fields, and the times of a queued press.
+  const lights = $derived(queuedLights(queue, card.device))
+  const queuedTimes = $derived.by(() => {
+    const c = queue[card.device]
+    return c?.kind === 'press' ? c.times : 1
+  })
 
   const view = $derived(cardView(card, device, reachable))
   const off = $derived(busy || disabled || !!device?.error)
@@ -25,23 +36,36 @@
     return device.on ? `On${device.brightness !== null ? ` · ${device.brightness}%` : ''}` : 'Off'
   })
 
+  // The select always rests on its empty option, labelled with the queued preset, so
+  // picking that same preset again is a change, and sends it now.
   function applyPreset(e: Event) {
     const select = e.currentTarget as HTMLSelectElement
-    if (select.value) onlights(card.device, { preset: select.value })
+    const value = select.value
+    if (value) {
+      if (lights?.preset === value) onsend(card.device)
+      else onqueuelights(card.device, { preset: value })
+    }
     select.value = ''
+  }
+
+  // A tap on an amber control sends its device's queued command now.
+  function tapLights(on: boolean) {
+    if (lights?.on === on) onsend(card.device)
+    else onqueuelights(card.device, { on })
   }
 
   let picking = $state<{ id: string; label: string } | null>(null)
 
   function tap(b: { id: string; label: string }) {
-    if (isRepeat(device, b.id)) picking = b
-    else onpress(card.device, b.id)
+    if (isQueued(queue, card.device, b.id)) onsend(card.device)
+    else if (isRepeat(device, b.id)) picking = b
+    else onqueuepress(card.device, b.id)
   }
 
   function pickTimes(n: number) {
     const id = picking?.id
     picking = null
-    if (id) onpress(card.device, id, n)
+    if (id) onqueuepress(card.device, id, n)
   }
 
   let saving = $state(false)
@@ -56,7 +80,7 @@
   }
 
   const onChange = (e: Event) =>
-    onlights(card.device, { brightness: Number((e.currentTarget as HTMLInputElement).value) })
+    onqueuelights(card.device, { brightness: Number((e.currentTarget as HTMLInputElement).value) })
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && (picking = null)} />
@@ -71,12 +95,18 @@
     {#if status}<p class="status">{status}</p>{/if}
     {#if device?.kind === 'lights'}
       <div class="row">
-        <button class:active={device.on === true} disabled={off} onclick={() => onlights(card.device, { on: true })}>On</button>
-        <button class:active={device.on === false} disabled={off} onclick={() => onlights(card.device, { on: false })}>Off</button>
+        <button class:active={device.on === true} class:queued={lights?.on === true} disabled={off} onclick={() => tapLights(true)}>On</button>
+        <button class:active={device.on === false} class:queued={lights?.on === false} disabled={off} onclick={() => tapLights(false)}>Off</button>
       </div>
       {#if view.presets.length}
-        <select class="presets" disabled={off} aria-label="Preset" onchange={applyPreset}>
-          <option value="">Preset…</option>
+        <select
+          class="presets"
+          class:queued={lights?.preset !== undefined}
+          disabled={off}
+          aria-label="Preset"
+          onchange={applyPreset}
+        >
+          <option value="">{lights?.preset ?? 'Preset…'}</option>
           {#each view.presets as p}<option value={p}>{p}</option>{/each}
         </select>
       {/if}
@@ -84,7 +114,8 @@
         type="range"
         min="1"
         max="100"
-        value={device.brightness ?? 50}
+        class:queued={lights?.brightness !== undefined}
+        value={lights?.brightness ?? device.brightness ?? 50}
         disabled={off}
         aria-label="Brightness"
         onchange={onChange}
@@ -113,7 +144,10 @@
     {:else}
       <div class="row">
         {#each view.buttons as b}
-          <button disabled={off} onclick={() => tap(b)}>{b.label}</button>
+          {@const queued = isQueued(queue, card.device, b.id)}
+          <button class:queued disabled={off} onclick={() => tap(b)}>
+            {queued && queuedTimes > 1 ? `${b.label} ×${queuedTimes}` : b.label}
+          </button>
         {/each}
       </div>
       {#if picking}
@@ -149,6 +183,8 @@
     padding: 0 12px;
   }
   select.presets:disabled { opacity: 0.5; }
+  /* Queued for Apply all. Dark text keeps contrast on amber. */
+  select.presets.queued { background: #f59e0b; color: #111827; font-weight: 600; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; }
   button {
     flex: 1 1 0;
@@ -164,8 +200,11 @@
   }
   button:active { background: var(--button-active); }
   button.active { background: #2563eb; }
+  button.queued { background: #f59e0b; color: #111827; }
+  button.queued:active { background: #d97706; }
   button:disabled { opacity: 0.5; }
   input[type='range'] { width: 100%; margin: 14px 0 2px; }
+  input[type='range'].queued { accent-color: #f59e0b; }
   .save { margin-top: 12px; }
   input.name {
     flex: 2 1 160px;

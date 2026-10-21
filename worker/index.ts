@@ -1,10 +1,10 @@
 import type { Env } from "./env";
 import { json } from "./util";
 import { userName, handleLogin, handleLogout, loginPage } from "./auth";
-import { getHouse, postLights, postPress, postPreset } from "./house";
+import { getHouse, postBatch, postLights, postPress, postPreset } from "./house";
 import { getLayout, putLayout } from "./layout";
 
-// The Worker handles /api/house, /api/press, /api/lights, /api/presets, /api/layout and falls through to the static assets (dist/)
+// The Worker handles /api/house, /api/press, /api/lights, /api/presets, /api/batch, /api/layout and falls through to the static assets (dist/)
 // for everything else. A shared-password gate fronts everything, so nothing
 // reaches the room server without a signed-in person.
 export default {
@@ -29,6 +29,7 @@ export default {
         if (pathname === "/api/press" && req.method === "POST") return await postPress(req, env, name);
         if (pathname === "/api/lights" && req.method === "POST") return await postLights(req, env, name);
         if (pathname === "/api/presets" && req.method === "POST") return await postPreset(req, env, name);
+        if (pathname === "/api/batch" && req.method === "POST") return await postBatch(req, env, name);
         if (pathname === "/api/layout" && req.method === "GET") return json(await getLayout(env, name));
         if (pathname === "/api/layout" && req.method === "PUT") return await putLayout(req, env, name);
         return json({ error: "not found" }, 404);
