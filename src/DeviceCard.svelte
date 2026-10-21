@@ -11,8 +11,9 @@
     reachable?: boolean
     onpress: (device: string, button: string) => void
     onlights: (device: string, opts: LightsOpts) => void
+    onsavepreset: (device: string, name: string) => Promise<boolean>
   }
-  let { card, device, busy, disabled = false, reachable = true, onpress, onlights }: Props = $props()
+  let { card, device, busy, disabled = false, reachable = true, onpress, onlights, onsavepreset }: Props = $props()
 
   const view = $derived(cardView(card, device, reachable))
   const off = $derived(busy || disabled || !!device?.error)
@@ -39,6 +40,17 @@
     if (!device.last_action || !device.sent_at) return 'Last: nothing yet'
     return `Last: ${label(device.last_action)} · ${when(device.sent_at)}${device.by ? ` by ${device.by}` : ''}`
   })
+
+  let saving = $state(false)
+  let presetName = $state('')
+
+  async function savePresetName() {
+    if (!presetName.trim()) return
+    if (await onsavepreset(card.device, presetName.trim())) {
+      saving = false
+      presetName = ''
+    }
+  }
 
   const onChange = (e: Event) =>
     onlights(card.device, { brightness: Number((e.currentTarget as HTMLInputElement).value) })
@@ -69,6 +81,27 @@
         aria-label="Brightness"
         onchange={onChange}
       />
+      {#if reachable && !device.error}
+        {#if saving}
+          <div class="row save">
+            <input
+              type="text"
+              class="name"
+              maxlength="30"
+              placeholder="Preset name"
+              aria-label="Preset name"
+              bind:value={presetName}
+              onkeydown={(e) => e.key === 'Enter' && !off && savePresetName()}
+            />
+            <button disabled={off || !presetName.trim()} onclick={savePresetName}>Save</button>
+            <button disabled={busy} onclick={() => { saving = false; presetName = '' }}>Cancel</button>
+          </div>
+        {:else}
+          <div class="row save">
+            <button disabled={off} onclick={() => (saving = true)}>Save as preset…</button>
+          </div>
+        {/if}
+      {/if}
     {:else}
       <div class="row">
         {#each view.buttons as b}
@@ -100,4 +133,16 @@
   button.active { background: #2563eb; }
   button:disabled { opacity: 0.5; }
   input[type='range'] { width: 100%; margin: 14px 0 2px; }
+  .save { margin-top: 12px; }
+  input.name {
+    flex: 2 1 160px;
+    min-height: 48px;
+    box-sizing: border-box;
+    border: none;
+    border-radius: 12px;
+    background: var(--button);
+    color: var(--fg);
+    font-size: 1rem;
+    padding: 0 12px;
+  }
 </style>

@@ -53,3 +53,6 @@ export const press = (device: string, button: string) =>
 
 export const setLights = (device: string, opts: { on?: boolean; brightness?: number; preset?: string }) =>
   request<{ done: string; note: string | null }>('/api/lights', send('POST', { device, ...opts }))
+
+export const savePreset = (device: string, name: string) =>
+  request<{ name: string }>('/api/presets', send('POST', { device, name }))

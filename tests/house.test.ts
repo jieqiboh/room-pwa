@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getHouse, MESSAGES, postLights, postPress, RATE_LIMIT, RATE_WINDOW_MS } from "../worker/house";
+import { getHouse, MESSAGES, postLights, postPress, postPreset, RATE_LIMIT, RATE_WINDOW_MS } from "../worker/house";
 import { putLayout } from "../worker/layout";
 import { env, fakeRoom } from "./helpers";
 
@@ -62,6 +62,64 @@ describe("POST /api/press", () => {
     expect((await limited.json()).error).toBe(MESSAGES.rateLimited);
     expect((await postPress(press("shutter", "stop"), e, "Mum", room.fetch, t0 + 5)).status).toBe(200);
     expect((await postPress(press("shutter", "stop"), e, "Kid", room.fetch, t0 + RATE_WINDOW_MS + 10)).status).toBe(200);
+  });
+});
+
+const preset = (body: unknown) =>
+  new Request("https://app.test/api/presets", { method: "POST", body: JSON.stringify(body) });
+
+describe("POST /api/presets", () => {
+  it("saves the preset and logs it", async () => {
+    const e = env();
+    const room = fakeRoom();
+    const res = await postPreset(preset({ device: "jq-lights", name: "  Movie " }), e, "JQ", room.fetch);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ name: "Movie" });
+    expect(room.calls).toEqual([{ name: "save_preset", args: { device: "jq-lights", name: "Movie" } }]);
+    const row = await e.DB.prepare("SELECT who, device, action, sent_at, error FROM presses").first<any>();
+    expect(row).toMatchObject({ who: "JQ", device: "jq-lights", action: "save preset Movie", sent_at: null, error: null });
+  });
+
+  it("rejects a bad body", async () => {
+    const e = env();
+    const room = fakeRoom();
+    for (const [body, message] of [[{}, MESSAGES.badRequest], [{ name: "x" }, MESSAGES.badRequest],
+      [{ device: "", name: "x" }, MESSAGES.badRequest], [{ device: 5, name: "x" }, MESSAGES.badRequest],
+      [{ device: "jq-lights" }, MESSAGES.badPresetName], [{ device: "jq-lights", name: "   " }, MESSAGES.badPresetName],
+      [{ device: "jq-lights", name: 5 }, MESSAGES.badPresetName],
+      [{ device: "jq-lights", name: "x".repeat(31) }, MESSAGES.badPresetName]] as const) {
+      const bad = await postPreset(preset(body), e, "JQ", room.fetch);
+      expect(bad.status).toBe(400);
+      expect((await bad.json()).error).toBe(message);
+    }
+    expect(room.calls).toHaveLength(0);
+    expect((await postPreset(preset({ device: "jq-lights", name: "x".repeat(30) }), e, "JQ", room.fetch)).status).toBe(200);
+  });
+
+  it("is rate limited with the other presses", async () => {
+    const e = env();
+    const room = fakeRoom();
+    const t0 = 1_000_000;
+    for (let i = 0; i < RATE_LIMIT; i++) await postPress(press("shutter", "stop"), e, "Kid", room.fetch, t0 + i);
+    const limited = await postPreset(preset({ device: "jq-lights", name: "x" }), e, "Kid", room.fetch, t0 + 5);
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error).toBe(MESSAGES.rateLimited);
+    expect(room.calls.some((c) => c.name === "save_preset")).toBe(false);
+  });
+
+  it("explains a failure and logs it", async () => {
+    const e = env();
+    const room = fakeRoom();
+    room.fail = "down";
+    const res = await postPreset(preset({ device: "jq-lights", name: "x" }), e, "JQ", room.fetch);
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toBe(MESSAGES.unreachable);
+    room.fail = "rm4";
+    const tool = await postPreset(preset({ device: "jq-lights", name: "x" }), e, "JQ", room.fetch);
+    expect((await tool.json()).error).toBe(MESSAGES.toolFailed);
+    const row = await e.DB.prepare("SELECT sent_at, error FROM presses").first<any>();
+    expect(row.sent_at).toBeNull();
+    expect(row.error).toBeTruthy();
   });
 });
 
@@ -163,8 +221,9 @@ describe("room server access", () => {
     const room = fakeRoom();
     await postPress(press("shutter", "up"), e, "Mum", room.fetch);
     await postLights(lights({ device: "jq-lights", on: true }), e, "Mum", room.fetch);
+    await postPreset(preset({ device: "jq-lights", name: "x" }), e, "Mum", room.fetch);
     await getHouse(e, "Mum", room.fetch);
     expect(room.calls.length).toBeGreaterThan(0);
-    for (const c of room.calls) expect(["house", "press", "lights"]).toContain(c.name);
+    for (const c of room.calls) expect(["house", "press", "lights", "save_preset"]).toContain(c.name);
   });
 });

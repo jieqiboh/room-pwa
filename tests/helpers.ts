@@ -51,7 +51,7 @@ const device = (id: string, name: string, kind: string, buttons: string[] = [], 
 });
 
 // The room server as the Python MCP SDK answers: SSE replies and a session id,
-// with the house tools (house, press, lights).
+// with the house tools (house, press, lights, save_preset).
 export function fakeRoom(): FakeRoom {
   const devices = [
     device("shutter", "Shutter", "shutter", ["up", "down", "stop"]),
@@ -86,6 +86,7 @@ export function fakeRoom(): FakeRoom {
       if (name === "house") return sse({ result: { structuredContent: { devices } } });
       if (room.fail === "rm4") return sse({ result: { isError: true, content: [{ type: "text", text: "RM4 timeout" }] } });
       const target = devices.find((d) => d.id === args.device);
+      if (name === "save_preset") return sse({ result: { structuredContent: { name: args.name } } });
       if (name === "lights") {
         return sse({ result: { structuredContent: { target: target?.name ?? args.device, done: true, note: "" } } });
       }

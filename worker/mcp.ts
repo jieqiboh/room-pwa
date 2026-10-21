@@ -1,8 +1,8 @@
 import type { Env } from "./env";
 
-// The house server's three tools. This list is the line that keeps the room
+// The house server's tools. This list is the line that keeps the room
 // server's other tools out of the family app: nothing else is ever sent to it.
-export const ALLOWED_TOOLS = new Set(["house", "press", "lights"]);
+export const ALLOWED_TOOLS = new Set(["house", "press", "lights", "save_preset"]);
 
 const PROTOCOL_VERSION = "2025-06-18";
 const TIMEOUT_MS = 10_000;

@@ -2,8 +2,8 @@
   import { onMount } from 'svelte'
   import DeviceCard from './DeviceCard.svelte'
   import PageEditor from './PageEditor.svelte'
-  import { addPage } from './lib/layout'
-  import { getHouse, press, saveLayout, setLights, SignedOut, type DeviceView, type HouseState, type Layout } from './lib/api'
+  import { addPage, togglePick } from './lib/layout'
+  import { getHouse, press, saveLayout, savePreset, setLights, SignedOut, type DeviceView, type HouseState, type Layout } from './lib/api'
 
   let house = $state<HouseState | null>(null)
   let busy = $state(false)
@@ -49,16 +49,18 @@
     }
   }
 
-  async function run(job: () => Promise<void>) {
-    if (busy) return
+  async function run(job: () => Promise<void>): Promise<boolean> {
+    if (busy) return false
     busy = true
     error = null
     try {
       await job()
       navigator.vibrate?.(30)
       refresh()
+      return true
     } catch (e) {
       fail(e)
+      return false
     } finally {
       busy = false
     }
@@ -67,6 +69,15 @@
   const onpress = (device: string, button: string) => run(async () => { await press(device, button) })
   const onlights = (device: string, opts: { on?: boolean; brightness?: number; preset?: string }) =>
     run(async () => { await setLights(device, opts) })
+  // Saves the lights as a preset, then puts its button on this card of the current page.
+  const onsavepreset = (device: string, name: string) =>
+    run(async () => {
+      const saved = await savePreset(device, name)
+      if (!house || !page) return
+      const index = page.cards.findIndex((c) => c.device === device)
+      if (index < 0 || page.cards[index].picks.includes(saved.name)) return
+      house.layout = await saveLayout(togglePick(house.layout, page.id, index, saved.name))
+    })
 
   let menu = $state(false)
   // The layout being edited: a copy that includes a brand-new page until it is saved.
@@ -173,6 +184,7 @@
         disabled={signedOut || !house?.reachable}
         {onpress}
         {onlights}
+        {onsavepreset}
       />
     {/each}
     {#if page.cards.length === 0}

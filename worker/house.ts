@@ -12,6 +12,7 @@ export const MESSAGES = {
   toolFailed: "Home answered, but the device didn't. Try again, or use its own remote.",
   rateLimited: "Too many presses. Wait a few seconds and try again.",
   badRequest: "Unknown button.",
+  badPresetName: "Preset names are 1 to 30 characters.",
 };
 
 export interface Device {
@@ -102,6 +103,28 @@ export async function postLights(
     const changed = await callTool<Changed>(env, "lights", args, fetchFn);
     await log(env, who, device, action, now, null, null);
     return json({ done: changed.done, note: changed.note });
+  } catch (e) {
+    await log(env, who, device, action, now, null, errorText(e));
+    return json({ error: friendly(e) }, 502);
+  }
+}
+
+export async function postPreset(
+  req: Request, env: Env, who: string, fetchFn: typeof fetch = fetch, now = Date.now(),
+): Promise<Response> {
+  const { device, name: raw } = await readBody(req);
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!nonEmpty(device)) return json({ error: MESSAGES.badRequest }, 400);
+  if (name.length === 0 || name.length > 30) return json({ error: MESSAGES.badPresetName }, 400);
+  const action = `save preset ${name}`;
+
+  const limited = await rateLimit(env, who, now);
+  if (limited) return limited;
+
+  try {
+    const saved = await callTool<{ name: string }>(env, "save_preset", { device, name }, fetchFn);
+    await log(env, who, device, action, now, null, null);
+    return json({ name: saved.name });
   } catch (e) {
     await log(env, who, device, action, now, null, errorText(e));
     return json({ error: friendly(e) }, 502);
