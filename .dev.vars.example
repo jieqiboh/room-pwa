@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `wrangler dev` against dev/fake-room.mjs.
+ROOM_URL=http://127.0.0.1:8008/mcp
+ROOM_TOKEN=dev
+SITE_PASSWORD=dev

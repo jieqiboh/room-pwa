@@ -1,0 +1,54 @@
+// A stand-in for the room server's MCP endpoint, for `wrangler dev` without the
+// Funnel or the RM4. Answers like the Python SDK does (SSE replies, a session id).
+//   ROOM_TOKEN=dev node dev/fake-room.mjs          # all good
+//   FAIL=rm4 ROOM_TOKEN=dev node dev/fake-room.mjs  # the RM4 does not answer
+import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
+
+const TOKEN = process.env.ROOM_TOKEN ?? 'dev'
+const PORT = Number(process.env.PORT ?? 8008)
+let last = { last_action: null, sent_at: null }
+const calls = []
+
+const sse = (res, msg, headers = {}) => {
+  res.writeHead(200, { 'content-type': 'text/event-stream', ...headers })
+  res.end(`event: message\ndata: ${JSON.stringify(msg)}\n\n`)
+}
+const result = (structuredContent) => ({
+  content: [{ type: 'text', text: JSON.stringify(structuredContent) }], structuredContent, isError: false,
+})
+
+createServer(async (req, res) => {
+  if (req.url === '/calls') return res.end(JSON.stringify(calls))
+  if (req.url !== '/mcp') return res.writeHead(404).end()
+  if (req.headers.authorization !== `Bearer ${TOKEN}`) return res.writeHead(401).end('unauthorized')
+  if (req.method === 'DELETE') return res.writeHead(200).end()
+
+  let body = ''
+  for await (const chunk of req) body += chunk
+  const msg = JSON.parse(body)
+
+  if (msg.method === 'initialize') {
+    return sse(res, {
+      jsonrpc: '2.0', id: msg.id,
+      result: { protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'room', version: 'fake' } },
+    }, { 'mcp-session-id': randomUUID() })
+  }
+  if (!req.headers['mcp-session-id']) return res.writeHead(400).end('missing session')
+  if (!msg.id) return res.writeHead(202).end()
+  if (msg.method !== 'tools/call') return sse(res, { jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'method not found' } })
+
+  const { name, arguments: args } = msg.params
+  calls.push(name)
+  console.log('tools/call', name, args)
+  if (name === 'shutter_status') return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ ...last, note: 'fake', choices: ['down', 'stop', 'up'] }) })
+  if (name === 'shutter') {
+    if (process.env.FAIL === 'rm4') {
+      return sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'RM4 did not respond' }], isError: true } })
+    }
+    const sent_at = new Date().toISOString().replace(/\.\d+Z$/, '+00:00')
+    last = { last_action: args.action, sent_at }
+    return sse(res, { jsonrpc: '2.0', id: msg.id, result: result({ action: args.action, sent_at }) })
+  }
+  sse(res, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `this fake has no ${name}` }], isError: true } })
+}).listen(PORT, () => console.log(`fake room server on http://127.0.0.1:${PORT}/mcp`))

@@ -1,0 +1,29 @@
+{
+  "name": "room-pwa",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && tsc -p tsconfig.worker.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "fake-room": "node dev/fake-room.mjs",
+    "worker": "vite build && wrangler dev",
+    "icons": "rsvg-convert -w 192 -h 192 public/icon.svg -o public/icons/icon-192.png && rsvg-convert -w 512 -h 512 public/icon.svg -o public/icons/icon-512.png && rsvg-convert -w 180 -h 180 public/icon.svg -o public/icons/apple-touch-icon.png",
+    "deploy": "vite build && wrangler d1 migrations apply room-pwa --remote && wrangler deploy"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^24.13.2",
+    "svelte": "^5.56.4",
+    "svelte-check": "^4.7.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^3.2.6",
+    "wrangler": "^4.107.0"
+  }
+}

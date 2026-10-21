@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "room-pwa",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  // Served at room-pwa.<subdomain>.workers.dev, behind the shared-password gate.
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // Every request goes through the Worker, so the password gate covers the app too.
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "room-pwa",
+      // Fill in after `wrangler d1 create room-pwa`.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "vars": {
+    // The room server's MCP endpoint, published by Tailscale Funnel on the home PC.
+    "ROOM_URL": "https://<pc>.<tailnet>.ts.net/mcp"
+  }
+  // Secrets (wrangler secret put): SITE_PASSWORD, ROOM_TOKEN.
+}
