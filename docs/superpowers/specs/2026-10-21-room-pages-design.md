@@ -47,7 +47,7 @@ Today room-pwa controls one thing: the roller shutter in JQ's room. The family w
 
 ## Constraints
 
-- **One RM4** (`192.168.0.12`) for the whole house. JQ believes it reaches every device; everything is within about 10 m. Infrared is blocked by walls and doors, though. **Before building the house list, record one setting from a non-JQ aircon and send it from the RM4's current spot.** If it doesn't arrive, the design still holds, but a second RM4 is needed and the house list must say which RM4 each device uses.
+- **One RM4** (`192.168.0.12`) for the whole house. JQ decided to assume it reaches every device (everything is within about 10 m); this is untested for infrared devices outside JQ's room. Build for exactly one RM4, as the server does today: no per-device RM4 field. If a room later turns out to be out of reach, multi-RM4 support is a separate change.
 - **The room server is the only thing that talks to the RM4 and the Hue Bridge.** It lives in agent-platform (`servers/room`, Python, MCP over Streamable HTTP, one asyncio lock around the RM4) and runs on the PC as the `room` systemd service on `100.76.62.36:8008`. It is reached from the Worker through Tailscale Funnel at `https://jieqiboh.tail568a82.ts.net/mcp`. Extend it; don't add a second server that drives the RM4.
 - **The bot's limits stay.** Today `ROOM_ROOMS=jq` limits the server's Hue access to JQ's room for every client. The PWA needs the whole house, the bot must stay at `jq`, and both currently use the same token (`ROOM_TOKEN`). The builder chooses how to separate them, for example a second token for the PWA that unlocks house-wide tools.
 - **The Worker allowlist** ([worker/mcp.ts](../../../worker/mcp.ts) `ALLOWED_TOOLS`) is the line that controls what the family app can reach. It gets the new house-wide tools and nothing else.
@@ -68,6 +68,7 @@ Today room-pwa controls one thing: the roller shutter in JQ's room. The family w
 | Recording signals stays a PC command | JQ |
 | Combos are left out now and come next | JQ |
 | Bot is not part of this; it stays unchanged | JQ |
+| Assume one RM4 is enough for the whole house | JQ |
 | Room pages and picks stored server-side (D1) under the sign-in name, so they survive a new phone | My call |
 | Extend the existing room server rather than writing a second one | My call |
 | One lights device per Hue room, not per bulb | My call |
@@ -75,7 +76,7 @@ Today room-pwa controls one thing: the roller shutter in JQ's room. The family w
 
 ## Left to the builder
 
-- The house-list file format on the PC, and how recorded codes are stored per device. Must cover: id, display name, kind, which RM4, and settings mapped to a code with a human label (`cool_26_fan4` → "Cool 26 · fan 4").
+- The house-list file format on the PC, and how recorded codes are stored per device. Must cover: id, display name, kind, and settings mapped to a code with a human label (`cool_26_fan4` → "Cool 26 · fan 4").
 - The shape of the new room-server tools, for example `devices()`, `press(device, setting)`, `device_status(device)` and house-wide light tools, and how they're kept away from the bot.
 - How `learn_ir.py` gains a `--device` option, or similar, and how shutter radio codes get recorded on the PC. Today they come from the Mac Hue app's `shutter.py`.
 - D1 schema for room pages, cards, order and picks, plus how the existing `presses` table gains a device column. Migrate existing rows as "JQ shutter".
