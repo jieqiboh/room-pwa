@@ -34,6 +34,8 @@ export interface FakeRoom {
   calls: { name: string; args: any }[];
   requests: { headers: Headers; body: any }[];
   fail?: "rm4" | "down" | "html";
+  // As the room server before the house endpoint went stateless: a request with no session is refused.
+  stateful?: boolean;
   // When set, every send gets this sent_at instead of a fresh one.
   sentAt?: string;
 }
@@ -50,7 +52,7 @@ const device = (id: string, name: string, kind: string, buttons: string[] = [], 
   last_action: null, sent_at: null, on: null, brightness: null, error: null,
 });
 
-// The room server as the Python MCP SDK answers: SSE replies and a session id,
+// The room server as the Python MCP SDK answers: SSE replies (a session id when asked to initialize),
 // with the house tools (house, press, lights, save_preset, batch).
 export function fakeRoom(): FakeRoom {
   const devices = [
@@ -77,6 +79,10 @@ export function fakeRoom(): FakeRoom {
         `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: body.id, ...(msg as object) })}\n\n`,
         { headers: { "content-type": "text/event-stream", ...extra } });
 
+      if (room.stateful && body.method !== "initialize" && !headers.get("mcp-session-id")) {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Bad Request: Missing session ID" } }),
+          { status: 400, headers: { "content-type": "application/json" } });
+      }
       if (body.method === "initialize") {
         return sse({ result: { protocolVersion: body.params.protocolVersion } }, { "mcp-session-id": "sess-1" });
       }

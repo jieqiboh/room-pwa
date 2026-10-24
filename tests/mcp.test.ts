@@ -11,14 +11,23 @@ describe("callTool", () => {
     expect(room.requests).toHaveLength(0);
   });
 
-  it("initializes, then calls the tool with the session and the bearer token", async () => {
+  it("calls the tool in one request with the bearer token", async () => {
     const room = fakeRoom();
     const sent = await callTool<{ action: string }>(env(), "press", { device: "shutter", button: "stop" }, room.fetch);
     expect(sent.action).toBe("stop");
-    expect(room.requests.map((r) => r.body.method)).toEqual(["initialize", "notifications/initialized", "tools/call"]);
-    const call = room.requests[2].headers;
-    expect(call.get("mcp-session-id")).toBe("sess-1");
-    expect(call.get("authorization")).toBe("Bearer room-token");
+    expect(room.requests.map((r) => r.body.method)).toEqual(["tools/call"]);
+    expect(room.requests[0].headers.get("authorization")).toBe("Bearer room-token");
+    expect(room.calls).toEqual([{ name: "press", args: { device: "shutter", button: "stop" } }]);
+  });
+
+  it("initializes and calls again when the room server wants a session", async () => {
+    const room = fakeRoom();
+    room.stateful = true;
+    const sent = await callTool<{ action: string }>(env(), "press", { device: "shutter", button: "stop" }, room.fetch);
+    expect(sent.action).toBe("stop");
+    expect(room.requests.map((r) => r.body.method))
+      .toEqual(["tools/call", "initialize", "notifications/initialized", "tools/call"]);
+    expect(room.requests[3].headers.get("mcp-session-id")).toBe("sess-1");
     expect(room.calls).toEqual([{ name: "press", args: { device: "shutter", button: "stop" } }]);
   });
 

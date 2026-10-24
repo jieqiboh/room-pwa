@@ -6,8 +6,8 @@ Room pages: each person makes their own page of device cards (shutters, aircon, 
 phone ──▶ Worker (shared password) ──▶ Tailscale Funnel (bearer token) ──▶ room server :8008 ──▶ RM4
 ```
 
-- `worker/`: the API. `/api/house`, `/api/press` and `/api/lights` call the room server's house endpoint (`/house/mcp`) over MCP ([worker/mcp.ts](worker/mcp.ts)), with the house token. Each person's pages are stored in D1, each press is logged with who sent it, and a person can press 4 times per 10 s at most.
-- `src/`: the Svelte page, with a page menu and an editor for choosing which devices go on a page. `vite-plugin-pwa` makes it installable and caches only scripts, styles and icons, never `/api`.
+- `worker/`: the API. `/api/house`, `/api/press` and `/api/lights` call the room server's house endpoint (`/house/mcp`) over MCP ([worker/mcp.ts](worker/mcp.ts)), one stateless `tools/call` per request, with the house token. Each person's pages are stored in D1, each press is logged with who sent it, and a person can press 4 times per 10 s at most.
+- `src/`: the Svelte page, with a page menu and an editor for choosing which devices go on a page. `vite-plugin-pwa` makes it installable and caches the shell (page, scripts, styles, icons), never `/api`; the app draws the last house it saw at once and refreshes it in the background.
 - `dev/fake-room.mjs`: a stand-in room server for local runs.
 
 ## Local development

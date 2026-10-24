@@ -13,8 +13,10 @@ export class RoomUnreachable extends Error {}
 // The room server answered, but the tool failed (e.g. the RM4 did not respond).
 export class ToolFailed extends Error {}
 
-// Call one allowed tool over MCP Streamable HTTP: initialize, the initialized
-// notification, then tools/call. Returns the tool's structured result.
+// Call one allowed tool over MCP Streamable HTTP. The house endpoint is stateless,
+// so a lone tools/call is one round trip over Funnel. A server that wants a session
+// answers 400; then initialize, send the initialized notification and call again.
+// Returns the tool's structured result.
 export async function callTool<T>(
   env: Env, name: string, args: Record<string, unknown> = {},
   fetchFn: typeof fetch = fetch, timeoutMs: number = TIMEOUT_MS,
@@ -25,36 +27,41 @@ export async function callTool<T>(
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
     authorization: `Bearer ${env.ROOM_TOKEN ?? ""}`,
+    "mcp-protocol-version": PROTOCOL_VERSION,
   };
 
-  const post = async (body: unknown): Promise<Response> => {
-    let res: Response;
+  const send = async (body: unknown): Promise<Response> => {
     try {
-      res = await fetchFn(env.ROOM_URL, {
+      return await fetchFn(env.ROOM_URL, {
         method: "POST", headers, body: JSON.stringify(body),
         redirect: "manual", signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
       throw new RoomUnreachable(`fetch failed: ${(e as Error).message}`);
     }
+  };
+  const ok = (res: Response): Response => {
     if (!res.ok) throw new RoomUnreachable(`room server answered ${res.status}`);
     return res;
   };
 
-  const init = await post({
-    jsonrpc: "2.0", id: 1, method: "initialize",
-    params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "room-pwa", version: "1" } },
-  });
-  const initMsg = await readReply(init, 1);
-  if (initMsg.error) throw new RoomUnreachable(`initialize: ${initMsg.error.message}`);
-  const session = init.headers.get("mcp-session-id");
-  if (session) headers["mcp-session-id"] = session;
-  headers["mcp-protocol-version"] = initMsg.result?.protocolVersion ?? PROTOCOL_VERSION;
-
-  await post({ jsonrpc: "2.0", method: "notifications/initialized" });
-
-  const call = await post({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } });
-  const msg = await readReply(call, 2);
+  const callBody = { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } };
+  let call = await send(callBody);
+  let session: string | null = null;
+  if (call.status === 400) {
+    const init = ok(await send({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "room-pwa", version: "1" } },
+    }));
+    const initMsg = await readReply(init, 1);
+    if (initMsg.error) throw new RoomUnreachable(`initialize: ${initMsg.error.message}`);
+    session = init.headers.get("mcp-session-id");
+    if (session) headers["mcp-session-id"] = session;
+    headers["mcp-protocol-version"] = initMsg.result?.protocolVersion ?? PROTOCOL_VERSION;
+    ok(await send({ jsonrpc: "2.0", method: "notifications/initialized" }));
+    call = await send(callBody);
+  }
+  const msg = await readReply(ok(call), 2);
 
   // Best effort: end the session so the room server can drop it.
   if (session) fetchFn(env.ROOM_URL, { method: "DELETE", headers }).catch(() => {});

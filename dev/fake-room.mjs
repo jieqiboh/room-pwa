@@ -1,5 +1,5 @@
 // A stand-in for the room server's MCP endpoint, for `wrangler dev` without the
-// Funnel or the RM4. Answers like the Python SDK does (SSE replies, a session id).
+// Funnel or the RM4. Stateless like the house endpoint: tools/call needs no session.
 //   ROOM_TOKEN=dev node dev/fake-room.mjs          # all good
 //   FAIL=rm4 ROOM_TOKEN=dev node dev/fake-room.mjs  # the RM4 does not answer
 import { createServer } from 'node:http'
@@ -59,7 +59,6 @@ createServer(async (req, res) => {
       result: { protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'room', version: 'fake' } },
     }, { 'mcp-session-id': randomUUID() })
   }
-  if (!req.headers['mcp-session-id']) return res.writeHead(400).end('missing session')
   if (!msg.id) return res.writeHead(202).end()
   if (msg.method !== 'tools/call') return sse(res, { jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'method not found' } })
 

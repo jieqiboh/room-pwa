@@ -6,7 +6,24 @@
   import { applyBatch, getHouse, press, saveLayout, savePreset, setLights, SignedOut, type DeviceView, type HouseState, type Layout } from './lib/api'
   import { commands, firstError, queueLights, queuePress, remove, settle, type LightsChange, type Queue } from './lib/queue'
 
-  let house = $state<HouseState | null>(null)
+  // The last house this phone saw, so the page draws at once; refresh() replaces it.
+  const HOUSE_KEY = 'room-house'
+  function readHouse(): HouseState | null {
+    try {
+      const v = JSON.parse(localStorage.getItem(HOUSE_KEY) ?? 'null')
+      return v?.layout && Array.isArray(v.devices) ? v : null
+    } catch {
+      return null
+    }
+  }
+  function forgetHouse() {
+    try {
+      localStorage.removeItem(HOUSE_KEY)
+    } catch { /* storage unavailable */ }
+  }
+
+  let house = $state<HouseState | null>(readHouse())
+  let fresh = $state(false)
   let busy = $state(false)
   let error = $state<string | null>(null)
   let signedOut = $state(false)
@@ -33,7 +50,12 @@
   )
 
   function fail(e: unknown) {
-    if (e instanceof SignedOut) signedOut = true
+    if (e instanceof SignedOut) {
+      signedOut = true
+      forgetHouse()
+      // Opened signed out (the page itself comes from the service worker): straight to sign-in.
+      if (!fresh) location.href = '/__login'
+    }
     else error = e instanceof Error ? e.message : String(e)
   }
 
@@ -43,6 +65,7 @@
       house = await getHouse()
       // Another device switched this person's page: the queue was for the old one.
       if (shown !== undefined && page?.id !== shown) queue = {}
+      fresh = true
       error = house.reachable ? null : (house.error ?? null)
       if (house.reachable) {
         cached = house.devices
@@ -161,6 +184,14 @@
     editing = null
   }
 
+  $effect(() => {
+    if (!fresh || !house?.reachable) return
+    const snapshot = JSON.stringify(house)
+    try {
+      localStorage.setItem(HOUSE_KEY, snapshot)
+    } catch { /* storage unavailable: nothing to cache */ }
+  })
+
   onMount(() => {
     refresh()
     // Phones keep the app alive in the background: refresh when it comes back.
@@ -177,13 +208,14 @@
     {:else}
       <h1>{editing ? 'Edit page' : 'Room'}</h1>
     {/if}
-    {#if house?.me}<span class="me">{house.me} · <a href="/__logout">Not {house.me}?</a></span>{/if}
+    {#if house?.me}<span class="me">{house.me} · <a href="/__logout" onclick={forgetHouse}>Not {house.me}?</a></span>{/if}
+    {#if house && !fresh && !signedOut}<span class="me">Updating…</span>{/if}
   </header>
 
   {#if signedOut}
     <div class="banner">
       You've been signed out.
-      <button class="link" onclick={() => location.reload()}>Sign in again</button>
+      <button class="link" onclick={() => (location.href = '/__login')}>Sign in again</button>
     </div>
   {:else if error}
     <div class="banner" role="alert">{error}</div>

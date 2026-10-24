@@ -32,21 +32,30 @@ interface Changed { target: string; done: string; note: string | null }
 interface BatchResult { device: string; ok: boolean; error: string | null }
 
 export async function getHouse(env: Env, who: string, fetchFn: typeof fetch = fetch): Promise<Response> {
-  const layout = await getLayout(env, who);
-  let house: House;
-  try {
-    house = await callTool<House>(env, "house", {}, fetchFn);
-  } catch (e) {
-    return json({ me: who, layout, reachable: false, error: friendly(e), devices: [] });
-  }
+  // The layout comes from D1 while the room server is asked, not before.
+  const [layout, called] = await Promise.all([
+    getLayout(env, who),
+    callTool<House>(env, "house", {}, fetchFn).then((h) => ({ house: h }), (e) => ({ error: e })),
+  ]);
+  if ("error" in called) return json({ me: who, layout, reachable: false, error: friendly(called.error), devices: [] });
+  const { house } = called;
 
   // The room server keeps the last command from any client (this app, the Telegram
-  // bot). If it was one of ours, the matching press says who sent it.
-  const devices = await Promise.all(house.devices.map(async (d) => {
-    const mine = d.sent_at === null ? null : await env.DB
-      .prepare("SELECT who FROM presses WHERE device = ? AND sent_at = ? ORDER BY id DESC LIMIT 1")
-      .bind(d.id, d.sent_at).first<{ who: string }>();
-    return { ...d, repeat: d.repeat ?? [], by: mine?.who ?? null };
+  // bot). If it was one of ours, the matching press says who sent it: one query for
+  // every device, the newest press winning.
+  const sentAts = [...new Set(house.devices.map((d) => d.sent_at).filter((s): s is string => s !== null))];
+  const by = new Map<string, string>();
+  if (sentAts.length) {
+    const { results } = await env.DB
+      .prepare(`SELECT device, sent_at, who FROM presses WHERE sent_at IN (${sentAts.map(() => "?").join(", ")}) ORDER BY id DESC`)
+      .bind(...sentAts).all<{ device: string; sent_at: string; who: string }>();
+    for (const r of results) {
+      const key = `${r.device} ${r.sent_at}`;
+      if (!by.has(key)) by.set(key, r.who);
+    }
+  }
+  const devices = house.devices.map((d) => ({
+    ...d, repeat: d.repeat ?? [], by: d.sent_at === null ? null : by.get(`${d.id} ${d.sent_at}`) ?? null,
   }));
   return json({ me: who, layout, reachable: true, devices });
 }

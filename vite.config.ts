@@ -22,11 +22,13 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Cache the shell's scripts, styles and icons only. Page loads always go to
-        // the network so an expired Access session reaches the sign-in page, and
-        // /api is never cached: a stale "last sent" would be worse than none.
-        globPatterns: ['**/*.{js,css,png,svg,webmanifest}'],
-        navigateFallback: null,
+        // Cache the shell (page, scripts, styles, icons) so the app opens at once from
+        // the phone. A signed-out phone still reaches sign-in: /api answers 401 and the
+        // app goes to /__login, which, like /__logout and /api, always goes to the
+        // network. /api is never cached: a stale "last sent" would be worse than none.
+        globPatterns: ['**/*.{html,js,css,png,svg,webmanifest}'],
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/__/, /^\/api\//],
       },
     }),
   ],
